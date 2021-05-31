@@ -1,13 +1,19 @@
 use chan;
 use std::{env,path,thread};
+use std::fs::File;
 use walkdir::WalkDir;
 
 const N_PRODUCERS: u32 = 10;
 
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
-    Some(WavDesc {
-        path,
-    })
+    let mut f = File::open(&path).expect("cannot read WAV file");
+    if let Ok((hdr, data)) = wav::read(&mut f) {
+        Some(WavDesc {
+            path, hdr, data
+        })
+    } else {
+        None
+    }
 }
 
 fn do_work(worker_id: u32,
@@ -32,10 +38,11 @@ fn do_work(worker_id: u32,
     done_tx.send(worker_id);
 }
 
+#[derive(Debug)]
 struct WavDesc {
     path: path::PathBuf,
-    // hdr: wav::Header,
-    // data: wav::BitDepth
+    hdr: wav::Header,
+    data: wav::BitDepth
 }
 
 fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>)
@@ -44,7 +51,7 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>)
     while n > 0 {
         if let Some(wdesc_opt) = wdescs_rx.recv() {
             if let Some(wdesc) = wdesc_opt {
-                println!("consumer received {:?} with {} producers remaining", wdesc.path, n);
+                println!("consumer received {:?}:{:?} with {} producers remaining", wdesc.path, wdesc.hdr, n);
             } else {
                 println!("consumer received None");
                 n -= 1;
