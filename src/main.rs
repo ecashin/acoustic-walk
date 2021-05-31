@@ -1,6 +1,6 @@
 use chan;
-use std::{env,path,thread};
 use std::fs::File;
+use std::{env, path, thread};
 use walkdir::WalkDir;
 
 const N_PRODUCERS: u32 = 10;
@@ -8,18 +8,18 @@ const N_PRODUCERS: u32 = 10;
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     let mut f = File::open(&path).expect("cannot read WAV file");
     if let Ok((hdr, data)) = wav::read(&mut f) {
-        Some(WavDesc {
-            path, hdr, data
-        })
+        Some(WavDesc { path, hdr, data })
     } else {
         None
     }
 }
 
-fn do_work(worker_id: u32,
+fn do_work(
+    worker_id: u32,
     paths_rx: chan::Receiver<path::PathBuf>,
     wdescs_tx: chan::Sender<Option<WavDesc>>,
-    done_tx: chan::Sender<u32>) {
+    done_tx: chan::Sender<u32>,
+) {
     for path in paths_rx {
         if path.is_file() {
             if let Some(ext) = path.extension() {
@@ -42,16 +42,18 @@ fn do_work(worker_id: u32,
 struct WavDesc {
     path: path::PathBuf,
     hdr: wav::Header,
-    data: wav::BitDepth
+    data: wav::BitDepth,
 }
 
-fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>)
-{
+fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
     let mut n = n_producers;
     while n > 0 {
         if let Some(wdesc_opt) = wdescs_rx.recv() {
             if let Some(wdesc) = wdesc_opt {
-                println!("consumer received {:?}:{:?} with {} producers remaining", wdesc.path, wdesc.hdr, n);
+                println!(
+                    "consumer received {:?}:{:?} with {} producers remaining",
+                    wdesc.path, wdesc.hdr, n
+                );
             } else {
                 println!("consumer received None");
                 n -= 1;
@@ -65,15 +67,15 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>)
 fn main() {
     let dirs: Vec<String> = env::args().skip(1).collect();
 
-    let (done_tx, done_rx) = chan::sync(0);  // worker completion channel
-    let (wdescs_tx, wdescs_rx) = chan::sync(0);  // wav description channel
+    let (done_tx, done_rx) = chan::sync(0); // worker completion channel
+    let (wdescs_tx, wdescs_rx) = chan::sync(0); // wav description channel
     {
         // Work consumer thread takes ownership of wdescs_rx.
         let wdescs_rx = wdescs_rx;
         let done_tx = done_tx.clone();
         thread::spawn(move || {
             consume(N_PRODUCERS, wdescs_rx);
-            done_tx.send(N_PRODUCERS);  // consumer ID is one greater than max producer ID
+            done_tx.send(N_PRODUCERS); // consumer ID is one greater than max producer ID
         });
     }
 
