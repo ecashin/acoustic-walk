@@ -1,30 +1,34 @@
 use chan;
 use std::{env,thread};
+use walkdir::WalkDir;
+
+const N_WORKERS: u32 = 10;
+
+fn do_work(worker_id: u32, rdirs: chan::Receiver<String>, done: chan::Sender<()>) {
+    for dir in rdirs {
+        println!("worker:{} dir:{}", worker_id, dir);
+    }
+    done.send(());
+}
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let dirs: Vec<String> = env::args().skip(1).collect();
 
-    let rx = {
-        let (tx, rx) = chan::sync(0);
-        for a in args.iter().skip(1) {
-            let tx = tx.clone();
-            let arg = a.clone();
+    let (sdone, rdone) = chan::sync(0);
+    {
+        let (sdirs, rdirs) = chan::sync(0);
+        for w in 0..N_WORKERS {
+            let sdone = sdone.clone();
+            let rdirs = rdirs.clone();
             thread::spawn(move || {
-                tx.send(arg);
+                do_work(w, rdirs, sdone);
             });
         }
-        rx
-    };
-    let wg = chan::WaitGroup::new();
-    for i in 0..args.len() {
-        println!("receiver {}", i);
-        wg.add(1);
-        let wg = wg.clone();
-        let rx = rx.clone();
-        thread::spawn(move || {
-            println!("{}:{:?}", i, rx.recv());
-            wg.done();
-        });
+        for d in dirs {
+            sdirs.send(d);
+        }
     }
-    wg.wait();
+    for _ in 0..N_WORKERS {
+        rdone.recv();
+    }
 }
