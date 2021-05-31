@@ -1,3 +1,7 @@
+use probability::prelude::*;
+// use rand::prelude::*;
+use rand_distr::Distribution;
+use rand_distr::Dirichlet;
 use std::{env, path, thread};
 use walkdir::WalkDir;
 
@@ -44,6 +48,21 @@ struct WavDesc {
     n_samples: u32,
 }
 
+fn select_one(wavs: Vec<WavDesc>) {
+    if wavs.len() == 0 {
+        return
+    }
+    let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples as f64).collect();
+    let dirichlet = Dirichlet::new(&lens).unwrap();
+    let mut source = source::default();
+    let probs = dirichlet.sample(&mut rand::thread_rng());
+    let cat = probability::distribution::Categorical::new(&probs[..]);
+    let decider = Independent(&cat, &mut source);
+    // let chosen = decider.take(20).collect::<Vec<_>>();
+    let chosen = decider.take(1).last().unwrap();
+    println!("selected for play: {:?}", chosen);
+}
+
 fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
     let mut n = n_producers;
     let mut wavs: Vec<WavDesc> = Vec::new();
@@ -64,6 +83,7 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         }
     }
     println!("collected {} wav descriptions", wavs.len());
+    select_one(wavs);
 }
 
 fn main() {
