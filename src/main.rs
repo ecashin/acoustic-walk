@@ -6,7 +6,8 @@ const N_PRODUCERS: u32 = 10;
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
         let spec = reader.spec();
-        Some(WavDesc { path, spec })
+        let n_samples = reader.len();
+        Some(WavDesc { path, spec, n_samples })
     } else {
         None
     }
@@ -40,6 +41,7 @@ fn do_work(
 struct WavDesc {
     path: path::PathBuf,
     spec: hound::WavSpec,
+    n_samples: u32,
 }
 
 fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
@@ -48,8 +50,8 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         if let Some(wdesc_opt) = wdescs_rx.recv() {
             if let Some(wdesc) = wdesc_opt {
                 println!(
-                    "consumer received {:?}:{:?} with {} producers remaining",
-                    wdesc.path, wdesc.spec, n
+                    "consumer received {:?}:{:?}:{:?} with {} producers remaining",
+                    wdesc.path, wdesc.spec, wdesc.n_samples, n
                 );
             } else {
                 println!("consumer received None");
