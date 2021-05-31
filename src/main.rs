@@ -1,14 +1,12 @@
-use chan;
-use std::fs::File;
 use std::{env, path, thread};
 use walkdir::WalkDir;
 
 const N_PRODUCERS: u32 = 10;
 
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
-    let mut f = File::open(&path).expect("cannot read WAV file");
-    if let Ok((hdr, data)) = wav::read(&mut f) {
-        Some(WavDesc { path, hdr, data })
+    if let Ok(reader) = hound::WavReader::open(&path) {
+        let spec = reader.spec();
+        Some(WavDesc { path, spec })
     } else {
         None
     }
@@ -41,8 +39,7 @@ fn do_work(
 #[derive(Debug)]
 struct WavDesc {
     path: path::PathBuf,
-    hdr: wav::Header,
-    data: wav::BitDepth,
+    spec: hound::WavSpec,
 }
 
 fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
@@ -52,7 +49,7 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
             if let Some(wdesc) = wdesc_opt {
                 println!(
                     "consumer received {:?}:{:?} with {} producers remaining",
-                    wdesc.path, wdesc.hdr, n
+                    wdesc.path, wdesc.spec, n
                 );
             } else {
                 println!("consumer received None");

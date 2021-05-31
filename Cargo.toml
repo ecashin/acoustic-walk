@@ -7,9 +7,9 @@ edition = "2018"
 
 [dependencies]
 chan = "0.1.23"
+hound = "3.4.0"
 jack = "0.7.1"
 probability = "0.17.0"
 rand = "0.8.3"
 rand_distr = "0.4.0"
 walkdir = "2.3.2"
-wav = "1.0.0"
