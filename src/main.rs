@@ -4,6 +4,12 @@ use walkdir::WalkDir;
 
 const N_PRODUCERS: u32 = 10;
 
+fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
+    Some(WavDesc {
+        path,
+    })
+}
+
 fn do_work(worker_id: u32,
     paths_rx: chan::Receiver<path::PathBuf>,
     wdescs_tx: chan::Sender<Option<WavDesc>>,
@@ -13,10 +19,10 @@ fn do_work(worker_id: u32,
             if let Some(ext) = path.extension() {
                 if let Some(ext) = ext.to_str() {
                     if ext.eq_ignore_ascii_case("wav") {
-                        println!("worker:{} sending for {:?}", worker_id, path);
-                        wdescs_tx.send(Some(WavDesc {
-                            path
-                        }));
+                        if let Some(wdesc) = describe_wav(path) {
+                            println!("worker:{} sending for {:?}", worker_id, &wdesc.path);
+                            wdescs_tx.send(Some(wdesc));
+                        }
                     }
                 }
             }
