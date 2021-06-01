@@ -3,6 +3,8 @@ use probability::prelude::*;
 use rand_distr::Distribution;
 use rand_distr::Dirichlet;
 use std::{env, path, thread};
+use std::fs::File;
+use std::io::BufReader;
 use walkdir::WalkDir;
 
 const N_PRODUCERS: u32 = 10;
@@ -10,8 +12,7 @@ const N_PRODUCERS: u32 = 10;
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
         let spec = reader.spec();
-        let n_samples = reader.duration();
-        Some(WavDesc { path, spec, n_samples })
+        Some(WavDesc { reader, path, spec })
     } else {
         None
     }
@@ -41,18 +42,23 @@ fn do_work(
     done_tx.send(worker_id);
 }
 
-#[derive(Debug)]
 struct WavDesc {
+    reader: hound::WavReader<BufReader<File>>,
     path: path::PathBuf,
     spec: hound::WavSpec,
-    n_samples: u32,
+}
+
+impl WavDesc {
+    fn n_samples(&self) -> u32 {
+       self.reader.duration() 
+    }
 }
 
 fn select_one(wavs: Vec<WavDesc>) {
     if wavs.len() == 0 {
         return
     }
-    let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples as f64).collect();
+    let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples() as f64).collect();
     let dirichlet = Dirichlet::new(&lens).unwrap();
     let mut source = source::default();
     let probs = dirichlet.sample(&mut rand::thread_rng());
@@ -71,7 +77,7 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
             if let Some(wdesc) = wdesc_opt {
                 println!(
                     "consumer received {:?}:{:?}:{:?} with {} producers remaining",
-                    wdesc.path, wdesc.spec, wdesc.n_samples, n
+                    wdesc.path, wdesc.spec, wdesc.n_samples(), n
                 );
                 wavs.push(wdesc);
             } else {
