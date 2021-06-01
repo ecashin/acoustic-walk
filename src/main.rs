@@ -10,7 +10,7 @@ const N_PRODUCERS: u32 = 10;
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
         let spec = reader.spec();
-        let n_samples = reader.len();
+        let n_samples = reader.duration();
         Some(WavDesc { path, spec, n_samples })
     } else {
         None
