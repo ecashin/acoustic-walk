@@ -11,8 +11,7 @@ const N_PRODUCERS: u32 = 10;
 
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
-        let spec = reader.spec();
-        Some(WavDesc { reader, path, spec })
+        Some(WavDesc { reader, path })
     } else {
         None
     }
@@ -45,12 +44,14 @@ fn do_work(
 struct WavDesc {
     reader: hound::WavReader<BufReader<File>>,
     path: path::PathBuf,
-    spec: hound::WavSpec,
 }
 
 impl WavDesc {
     fn n_samples(&self) -> u32 {
        self.reader.duration() 
+    }
+    fn spec(&self) -> hound::WavSpec {
+        self.reader.spec()
     }
 }
 
@@ -77,7 +78,7 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
             if let Some(wdesc) = wdesc_opt {
                 println!(
                     "consumer received {:?}:{:?}:{:?} with {} producers remaining",
-                    wdesc.path, wdesc.spec, wdesc.n_samples(), n
+                    wdesc.path, wdesc.spec(), wdesc.n_samples(), n
                 );
                 wavs.push(wdesc);
             } else {
