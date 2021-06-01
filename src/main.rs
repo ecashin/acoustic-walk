@@ -55,9 +55,13 @@ impl WavDesc {
     }
 }
 
-fn select_one(wavs: Vec<WavDesc>) {
+fn play_one(wav: WavDesc) {
+    println!("path:{:?} spec:{:?} n_samples:{}", wav.path, wav.spec(), wav.n_samples());
+}
+
+fn select_one(wavs: Vec<WavDesc>) -> Option<WavDesc> {
     if wavs.len() == 0 {
-        return
+        return None
     }
     let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples() as f64).collect();
     let dirichlet = Dirichlet::new(&lens).unwrap();
@@ -68,6 +72,7 @@ fn select_one(wavs: Vec<WavDesc>) {
     // let chosen = decider.take(20).collect::<Vec<_>>();
     let chosen = decider.take(1).last().unwrap();
     println!("selected for play: {:?}", chosen);
+    wavs.into_iter().nth(chosen)
 }
 
 fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
@@ -90,7 +95,11 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         }
     }
     println!("collected {} wav descriptions", wavs.len());
-    select_one(wavs);
+    if let Some(which) = select_one(wavs) {
+        play_one(which);
+    } else {
+        panic!("couldn't pick one track to play")
+    }
 }
 
 fn main() {
