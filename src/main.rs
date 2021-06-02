@@ -90,20 +90,26 @@ fn play_one(mut wav: WavDesc) {
                 panic!("need other than 16-bit sample support");
             }
 
-            let time_adjust = 2;
             let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
                 wav.reader.samples();
-            let samples: Vec<_> = samples.take(n * time_adjust).collect();
+            let samples: Vec<_> = samples.take(n * n_channels).collect();
 
-            for (i, v) in outl.iter_mut().enumerate() {
-                let j = (i / n_channels) / time_adjust;
-                let s = samples[j].as_ref().ok().unwrap();
-                *v = (*s as f32) / (i16::MAX as f32);
+            if samples.len() != n * n_channels {
+                panic!(
+                    "samples len is {}, not {}",
+                    samples.len(),
+                    n * n_channels
+                );
             }
-            for (i, v) in outr.iter_mut().enumerate() {
-                let j = (i / n_channels) / time_adjust;
-                let s = samples[j + 1].as_ref().ok().unwrap();
-                *v = (*s as f32) / (i16::MAX as f32);
+
+            for i in 0..(samples.len() / n_channels) {
+                let off = i * n_channels;
+                let mut s = samples[off].as_ref().ok().unwrap();
+                outl[i] = (*s as f32) / (i16::MAX as f32);
+                if n_channels > 1 {
+                    s = samples[off + 1].as_ref().ok().unwrap();
+                }
+                outr[i] = (*s as f32) / (i16::MAX as f32);
             }
 
             // Continue as normal
