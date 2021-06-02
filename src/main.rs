@@ -1,10 +1,10 @@
 use probability::prelude::*;
 // use rand::prelude::*;
-use rand_distr::Distribution;
 use rand_distr::Dirichlet;
-use std::{env, path, thread};
+use rand_distr::Distribution;
 use std::fs::File;
 use std::io::BufReader;
+use std::{env, path, thread, time};
 use walkdir::WalkDir;
 
 const N_PRODUCERS: u32 = 10;
@@ -48,20 +48,84 @@ struct WavDesc {
 
 impl WavDesc {
     fn n_samples(&self) -> u32 {
-       self.reader.duration() 
+        self.reader.duration()
     }
     fn spec(&self) -> hound::WavSpec {
         self.reader.spec()
     }
 }
 
-fn play_one(wav: WavDesc) {
-    println!("path:{:?} spec:{:?} n_samples:{}", wav.path, wav.spec(), wav.n_samples());
+fn play_one(mut wav: WavDesc) {
+    println!(
+        "path:{:?} spec:{:?} n_samples:{}",
+        wav.path,
+        wav.spec(),
+        wav.n_samples()
+    );
+
+    // https://github.com/RustAudio/rust-jack/blob/main/examples/sine.rs example
+
+    // 1. open a client
+    let (client, status) =
+        jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
+    println!("new client:{:?} status:{:?}", client, status);
+
+    // 2. register ports
+    let mut out_left = client
+        .register_port("acouwalk_out_L", jack::AudioOut::default())
+        .unwrap();
+    let mut out_right = client
+        .register_port("acouwalk_out_R", jack::AudioOut::default())
+        .unwrap();
+    let n_channels = wav.spec().channels as usize;
+
+    let process = jack::ClosureProcessHandler::new(
+        move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
+            let outl = out_left.as_mut_slice(ps);
+            let outr = out_right.as_mut_slice(ps);
+            let n = outl.len();
+
+            // read interleaved samples
+            if wav.spec().bits_per_sample != 16 {
+                panic!("need other than 16-bit sample support");
+            }
+
+            let time_adjust = 2;
+            let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
+                wav.reader.samples();
+            let samples: Vec<_> = samples.take(n * time_adjust).collect();
+
+            for (i, v) in outl.iter_mut().enumerate() {
+                let j = (i / n_channels) / time_adjust;
+                let s = samples[j].as_ref().ok().unwrap();
+                *v = (*s as f32) / (i16::MAX as f32);
+            }
+            for (i, v) in outr.iter_mut().enumerate() {
+                let j = (i / n_channels) / time_adjust;
+                let s = samples[j + 1].as_ref().ok().unwrap();
+                *v = (*s as f32) / (i16::MAX as f32);
+            }
+
+            // Continue as normal
+            jack::Control::Continue
+        },
+    );
+
+    // 4. activate the client
+    let active_client = client.activate_async((), process).unwrap();
+    // processing starts here
+
+    thread::sleep(time::Duration::from_secs(10));
+
+    // 6. Optional deactivate. Not required since active_client will deactivate on
+    // drop, though explicit deactivate may help you identify errors in
+    // deactivate.
+    active_client.deactivate().unwrap();
 }
 
 fn select_one(wavs: Vec<WavDesc>) -> Option<WavDesc> {
     if wavs.len() == 0 {
-        return None
+        return None;
     }
     let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples() as f64).collect();
     let dirichlet = Dirichlet::new(&lens).unwrap();
@@ -83,7 +147,10 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
             if let Some(wdesc) = wdesc_opt {
                 println!(
                     "consumer received {:?}:{:?}:{:?} with {} producers remaining",
-                    wdesc.path, wdesc.spec(), wdesc.n_samples(), n
+                    wdesc.path,
+                    wdesc.spec(),
+                    wdesc.n_samples(),
+                    n
                 );
                 wavs.push(wdesc);
             } else {
