@@ -148,30 +148,24 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
     let mut n = n_producers;
     let mut wavs: Vec<WavDesc> = Vec::new();
     while n > 0 {
-        if let Some(wdesc_opt) = wdescs_rx.recv() {
-            if let Some(wdesc) = wdesc_opt {
-                println!(
-                    "consumer received {:?}:{:?}:{:?} with {} producers remaining",
-                    wdesc.path,
-                    wdesc.spec(),
-                    wdesc.n_samples(),
-                    n
-                );
-                wavs.push(wdesc);
-            } else {
-                println!("consumer received None");
-                n -= 1;
-            }
+        let wdesc_opt = wdescs_rx.recv().expect("producers don't close work chan");
+        if let Some(wdesc) = wdesc_opt {
+            println!(
+                "consumer received {:?}:{:?}:{:?} with {} producers remaining",
+                wdesc.path,
+                wdesc.spec(),
+                wdesc.n_samples(),
+                n
+            );
+            wavs.push(wdesc);
         } else {
-            panic!("producers don't close the work channel");
+            println!("consumer received None");
+            n -= 1;
         }
     }
     println!("collected {} wav descriptions", wavs.len());
-    if let Some(which) = select_one(wavs) {
-        play_one(which);
-    } else {
-        panic!("couldn't pick one track to play")
-    }
+    let which = select_one(wavs).expect("couldn't pick one track");
+    play_one(which);
 }
 
 fn main() {
