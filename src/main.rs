@@ -2,6 +2,7 @@ use probability::prelude::*;
 // use rand::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
+use samplerate::{convert, ConverterType};
 use std::fs::File;
 use std::io::BufReader;
 use std::{env, path, thread, time};
@@ -84,30 +85,39 @@ fn play_one(mut wav: WavDesc) {
         panic!("need other than 16-bit sample support");
     }
 
+    // https://docs.rs/samplerate/0.2.4/samplerate/fn.convert.html
+    let source_sr = wav.spec().sample_rate as usize;
+    let sink_sr = client.sample_rate();
+
     let process = jack::ClosureProcessHandler::new(
         move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
+            // TODO: Try to re-use a converter inside thread if possible.
             let outl = out_left.as_mut_slice(ps);
             let outr = out_right.as_mut_slice(ps);
             let n = outl.len();
+            let n_source = ((n * source_sr) / sink_sr) + n_channels;
 
             let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
                 wav.reader.samples();
             let samples: Vec<_> = samples
-                .take(n * n_channels)
+                .take(n_source * n_channels)
                 .map(|e| (e.ok().unwrap() as f32) / (i16::MAX as f32))
                 .collect();
-
-            if samples.len() != n * n_channels {
-                panic!("samples len is {}, not {}", samples.len(), n * n_channels);
-            }
-
-            for i in 0..(samples.len() / n_channels) {
-                let off = i * n_channels;
-                outl[i] = samples[off];
+            let samples = convert(
+                source_sr as u32,
+                sink_sr as u32,
+                n_channels,
+                ConverterType::SincBestQuality,
+                &samples,
+            )
+            .unwrap();
+            for i in 0..outl.len() {
+                let src_off = i * n_channels;
+                outl[i] = samples[src_off];
                 if n_channels > 1 {
-                    outr[i] = samples[off + 1];
+                    outr[i] = samples[src_off + 1];
                 } else {
-                    outr[i] = samples[off];
+                    outr[i] = samples[src_off];
                 }
             }
 
