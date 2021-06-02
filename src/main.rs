@@ -79,37 +79,36 @@ fn play_one(mut wav: WavDesc) {
         .unwrap();
     let n_channels = wav.spec().channels as usize;
 
+    // read interleaved samples
+    if wav.spec().bits_per_sample != 16 {
+        panic!("need other than 16-bit sample support");
+    }
+
     let process = jack::ClosureProcessHandler::new(
         move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
             let outl = out_left.as_mut_slice(ps);
             let outr = out_right.as_mut_slice(ps);
             let n = outl.len();
 
-            // read interleaved samples
-            if wav.spec().bits_per_sample != 16 {
-                panic!("need other than 16-bit sample support");
-            }
-
             let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
                 wav.reader.samples();
-            let samples: Vec<_> = samples.take(n * n_channels).collect();
+            let samples: Vec<_> = samples
+                .take(n * n_channels)
+                .map(|e| (e.ok().unwrap() as f32) / (i16::MAX as f32))
+                .collect();
 
             if samples.len() != n * n_channels {
-                panic!(
-                    "samples len is {}, not {}",
-                    samples.len(),
-                    n * n_channels
-                );
+                panic!("samples len is {}, not {}", samples.len(), n * n_channels);
             }
 
             for i in 0..(samples.len() / n_channels) {
                 let off = i * n_channels;
-                let mut s = samples[off].as_ref().ok().unwrap();
-                outl[i] = (*s as f32) / (i16::MAX as f32);
+                outl[i] = samples[off];
                 if n_channels > 1 {
-                    s = samples[off + 1].as_ref().ok().unwrap();
+                    outr[i] = samples[off + 1];
+                } else {
+                    outr[i] = samples[off];
                 }
-                outr[i] = (*s as f32) / (i16::MAX as f32);
             }
 
             // Continue as normal
