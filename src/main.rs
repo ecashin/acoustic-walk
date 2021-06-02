@@ -5,7 +5,7 @@ use rand_distr::Distribution;
 use samplerate::{convert, ConverterType};
 use std::fs::File;
 use std::io::BufReader;
-use std::{env, path, thread, time};
+use std::{env, path, thread};
 use walkdir::WalkDir;
 
 const N_PRODUCERS: u32 = 10;
@@ -130,7 +130,7 @@ fn play_one(mut wav: WavDesc) {
     let active_client = client.activate_async((), process).unwrap();
     // processing starts here
 
-    thread::sleep(time::Duration::from_secs(10));
+    let _: String = text_io::read!();
 
     // 6. Optional deactivate. Not required since active_client will deactivate on
     // drop, though explicit deactivate may help you identify errors in
