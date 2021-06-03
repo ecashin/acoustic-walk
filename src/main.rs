@@ -42,21 +42,13 @@ impl Grain {
     }
 }
 
-fn grain_demo() {
-    let len = 100;
-    for i in 0..len {
-        let g = Grain {
-            pos: i,
-            start: 0,
-            end: len,
-        };
-        println!("{}", g.amplitude(None));
-    }
-}
-
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
-        Some(WavDesc { reader, path })
+        Some(WavDesc {
+            path,
+            n_samples: reader.duration(),
+            spec: reader.spec(),
+        })
     } else {
         None
     }
@@ -86,27 +78,22 @@ fn do_work(
     done_tx.send(worker_id);
 }
 
+#[derive(Clone)]
 struct WavDesc {
-    reader: hound::WavReader<BufReader<File>>,
+    // reader: hound::WavReader<BufReader<File>>,
     path: path::PathBuf,
+    n_samples: u32,
+    spec: hound::WavSpec,
 }
 
-impl WavDesc {
-    fn n_samples(&self) -> u32 {
-        self.reader.duration()
-    }
-    fn spec(&self) -> hound::WavSpec {
-        self.reader.spec()
-    }
-}
-
-fn play_one(mut wav: WavDesc) {
+fn play_one(wav: WavDesc) {
     println!(
         "path:{:?} spec:{:?} n_samples:{}",
         wav.path,
-        wav.spec(),
-        wav.n_samples()
+        wav.spec,
+        wav.n_samples
     );
+    let mut wav_reader = hound::WavReader::open(wav.path).unwrap();
 
     // https://github.com/RustAudio/rust-jack/blob/main/examples/sine.rs example
 
@@ -122,15 +109,15 @@ fn play_one(mut wav: WavDesc) {
     let mut out_right = client
         .register_port("acouwalk_out_R", jack::AudioOut::default())
         .unwrap();
-    let n_channels = wav.spec().channels as usize;
+    let n_channels = wav.spec.channels as usize;
 
     // read interleaved samples
-    if wav.spec().bits_per_sample != 16 {
+    if wav.spec.bits_per_sample != 16 {
         panic!("need other than 16-bit sample support");
     }
 
     // https://docs.rs/samplerate/0.2.4/samplerate/fn.convert.html
-    let source_sr = wav.spec().sample_rate as usize;
+    let source_sr = wav.spec.sample_rate as usize;
     let sink_sr = client.sample_rate();
 
     let process = jack::ClosureProcessHandler::new(
@@ -142,7 +129,7 @@ fn play_one(mut wav: WavDesc) {
             let n_source = ((n * source_sr) / sink_sr) + n_channels;
 
             let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
-                wav.reader.samples();
+                wav_reader.samples();
             let samples: Vec<_> = samples
                 .take(n_source * n_channels)
                 .map(|e| (e.ok().unwrap() as f32) / (i16::MAX as f32))
@@ -182,20 +169,17 @@ fn play_one(mut wav: WavDesc) {
     active_client.deactivate().unwrap();
 }
 
-fn select_one(wavs: Vec<WavDesc>) -> Option<WavDesc> {
+fn select_wavs(wavs: &Vec<WavDesc>, n: usize) -> Option<Vec<usize>> {
     if wavs.len() == 0 {
         return None;
     }
-    let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples() as f64).collect();
+    let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples as f64).collect();
     let dirichlet = Dirichlet::new(&lens).unwrap();
     let mut source = source::default();
     let probs = dirichlet.sample(&mut rand::thread_rng());
     let cat = probability::distribution::Categorical::new(&probs[..]);
     let decider = Independent(&cat, &mut source);
-    // let chosen = decider.take(20).collect::<Vec<_>>();
-    let chosen = decider.take(1).last().unwrap();
-    println!("selected for play: {:?}", chosen);
-    wavs.into_iter().nth(chosen)
+    Some(decider.take(n).collect::<Vec<_>>())
 }
 
 fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
@@ -207,8 +191,8 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
             println!(
                 "consumer received {:?}:{:?}:{:?} with {} producers remaining",
                 wdesc.path,
-                wdesc.spec(),
-                wdesc.n_samples(),
+                wdesc.spec,
+                wdesc.n_samples,
                 n
             );
             wavs.push(wdesc);
@@ -218,13 +202,12 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         }
     }
     println!("collected {} wav descriptions", wavs.len());
-    let which = select_one(wavs).expect("couldn't pick one track");
-    play_one(which);
+    let which = select_wavs(&wavs, 1).expect("couldn't pick one track");
+    let i: usize = which[0];
+    play_one(wavs[i].clone());
 }
 
 fn main() {
-    grain_demo();
-    return;
     let dirs: Vec<String> = env::args().skip(1).collect();
 
     let (done_tx, done_rx) = chan::sync(0); // worker completion channel
