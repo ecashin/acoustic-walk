@@ -8,7 +8,51 @@ use std::io::BufReader;
 use std::{env, path, thread};
 use walkdir::WalkDir;
 
+const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
 const N_PRODUCERS: u32 = 10;
+
+struct Grain {
+    start: u32,
+    pos: u32,
+    end: u32,
+}
+
+impl Grain {
+    // https://en.wikipedia.org/wiki/Window_function#Tukey_window
+    fn amplitude(&self, alpha: Option<f32>) -> f32 {
+        let alpha = match alpha {
+            Some(a) => a,
+            None => DEFAULT_TUKEY_WINDOW_ALPHA,
+        };
+
+        let n = self.pos as f32;
+        let len = (self.end - self.start) as f32;
+        let n = if n >= (len / 2.0) {
+            len - n
+        } else {
+            n
+        };
+
+        if n < alpha * len / 2.0 {
+            let x = (2.0 * std::f32::consts::PI * n) / (alpha * len);
+            0.5 * (1.0 - x.cos())
+        } else {
+            1.0
+        }
+    }
+}
+
+fn grain_demo() {
+    let len = 100;
+    for i in 0..len {
+        let g = Grain {
+            pos: i,
+            start: 0,
+            end: len,
+        };
+        println!("{}", g.amplitude(None));
+    }
+}
 
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
@@ -179,6 +223,8 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
 }
 
 fn main() {
+    grain_demo();
+    return;
     let dirs: Vec<String> = env::args().skip(1).collect();
 
     let (done_tx, done_rx) = chan::sync(0); // worker completion channel
