@@ -42,12 +42,30 @@ impl Grain {
     }
 }
 
+fn max_amplitude(mut rd: hound::WavReader<BufReader<File>>) -> u32 {
+    if true {
+        return 0  // fast and wrong, for now
+    }
+    let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
+                rd.samples();
+    let mut max: i64 = 0;
+    for s in samples {
+        let s = s.expect("expected i16 sample");
+        let s = s as i64;
+        if s.abs() > max {
+            max = s.abs();
+        }
+    }
+    max as u32
+}
+
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
         Some(WavDesc {
             path,
             n_samples: reader.duration(),
             spec: reader.spec(),
+            max_amplitude: max_amplitude(reader),
         })
     } else {
         None
@@ -84,6 +102,7 @@ struct WavDesc {
     path: path::PathBuf,
     n_samples: u32,
     spec: hound::WavSpec,
+    max_amplitude: u32,
 }
 
 fn play_one(wav: WavDesc) {
