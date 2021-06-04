@@ -2,7 +2,7 @@ use probability::prelude::*;
 // use rand::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
-use samplerate::{convert, ConverterType};
+use samplerate::{convert, ConverterType, Samplerate};
 use std::fs::File;
 use std::io::BufReader;
 use std::{env, path, thread};
@@ -10,6 +10,8 @@ use walkdir::WalkDir;
 
 const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
 const N_PRODUCERS: u32 = 10;
+const N_GRAINS: u32 = 5;
+const GRAIN_MS: usize = 1000;
 
 struct Grain {
     start: u32,
@@ -27,11 +29,7 @@ impl Grain {
 
         let n = self.pos as f32;
         let len = (self.end - self.start) as f32;
-        let n = if n >= (len / 2.0) {
-            len - n
-        } else {
-            n
-        };
+        let n = if n >= (len / 2.0) { len - n } else { n };
 
         if n < alpha * len / 2.0 {
             let x = (2.0 * std::f32::consts::PI * n) / (alpha * len);
@@ -44,10 +42,9 @@ impl Grain {
 
 fn max_amplitude(mut rd: hound::WavReader<BufReader<File>>) -> u32 {
     if true {
-        return 0  // fast and wrong, for now
+        return 0; // fast and wrong, for now
     }
-    let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
-                rd.samples();
+    let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> = rd.samples();
     let mut max: i64 = 0;
     for s in samples {
         let s = s.expect("expected i16 sample");
@@ -105,70 +102,32 @@ struct WavDesc {
     max_amplitude: u32,
 }
 
-fn play_one(wav: WavDesc) {
-    println!(
-        "path:{:?} spec:{:?} n_samples:{}",
-        wav.path,
-        wav.spec,
-        wav.n_samples
-    );
-    let mut wav_reader = hound::WavReader::open(wav.path).unwrap();
-
-    // https://github.com/RustAudio/rust-jack/blob/main/examples/sine.rs example
-
-    // 1. open a client
-    let (client, status) =
-        jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
-    println!("new client:{:?} status:{:?}", client, status);
-
-    // 2. register ports
+fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Receiver<Vec<f32>>) {
+    println!("play starting");
     let mut out_left = client
         .register_port("acouwalk_out_L", jack::AudioOut::default())
         .unwrap();
     let mut out_right = client
         .register_port("acouwalk_out_R", jack::AudioOut::default())
         .unwrap();
-    let n_channels = wav.spec.channels as usize;
-
-    // read interleaved samples
-    if wav.spec.bits_per_sample != 16 {
-        panic!("need other than 16-bit sample support");
-    }
-
-    // https://docs.rs/samplerate/0.2.4/samplerate/fn.convert.html
-    let source_sr = wav.spec.sample_rate as usize;
-    let sink_sr = client.sample_rate();
-
+    let n_channels = 2;
+    let mut samples: Vec<f32> = Vec::new();
     let process = jack::ClosureProcessHandler::new(
         move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
-            // TODO: Try to re-use a converter inside thread if possible.
             let outl = out_left.as_mut_slice(ps);
             let outr = out_right.as_mut_slice(ps);
             let n = outl.len();
-            let n_source = ((n * source_sr) / sink_sr) + n_channels;
-
-            let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
-                wav_reader.samples();
-            let samples: Vec<_> = samples
-                .take(n_source * n_channels)
-                .map(|e| (e.ok().unwrap() as f32) / (i16::MAX as f32))
-                .collect();
-            let samples = convert(
-                source_sr as u32,
-                sink_sr as u32,
-                n_channels,
-                ConverterType::SincBestQuality,
-                &samples,
-            )
-            .unwrap();
-            for i in 0..outl.len() {
+            if samples.len() < n * 2 {
+                match samples_rx.recv() {
+                    Some(mut new_samples) => samples.append(&mut new_samples),
+                    None => return jack::Control::Quit,
+                }
+            }
+            let n = std::cmp::min(n, samples.len() / 2);
+            for i in 0..n {
                 let src_off = i * n_channels;
                 outl[i] = samples[src_off];
-                if n_channels > 1 {
-                    outr[i] = samples[src_off + 1];
-                } else {
-                    outr[i] = samples[src_off];
-                }
+                outr[i] = samples[src_off + 1];
             }
 
             // Continue as normal
@@ -180,12 +139,13 @@ fn play_one(wav: WavDesc) {
     let active_client = client.activate_async((), process).unwrap();
     // processing starts here
 
-    let _: String = text_io::read!();
-
     // 6. Optional deactivate. Not required since active_client will deactivate on
     // drop, though explicit deactivate may help you identify errors in
     // deactivate.
     active_client.deactivate().unwrap();
+
+    println!("play is done");
+    done_tx.send(());
 }
 
 fn select_wavs(wavs: &Vec<WavDesc>, n: usize) -> Option<Vec<usize>> {
@@ -201,7 +161,7 @@ fn select_wavs(wavs: &Vec<WavDesc>, n: usize) -> Option<Vec<usize>> {
     Some(decider.take(n).collect::<Vec<_>>())
 }
 
-fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
+fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
     let mut n = n_producers;
     let mut wavs: Vec<WavDesc> = Vec::new();
     while n > 0 {
@@ -209,10 +169,7 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         if let Some(wdesc) = wdesc_opt {
             println!(
                 "consumer received {:?}:{:?}:{:?} with {} producers remaining",
-                wdesc.path,
-                wdesc.spec,
-                wdesc.n_samples,
-                n
+                wdesc.path, wdesc.spec, wdesc.n_samples, n
             );
             wavs.push(wdesc);
         } else {
@@ -221,9 +178,69 @@ fn consume(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         }
     }
     println!("collected {} wav descriptions", wavs.len());
-    let which = select_wavs(&wavs, 1).expect("couldn't pick one track");
-    let i: usize = which[0];
-    play_one(wavs[i].clone());
+
+    let (client, status) =
+        jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
+    println!("new client:{:?} status:{:?}", client, status);
+
+    let (samples_tx, samples_rx) = chan::sync(100);
+    let (done_tx, done_rx) = chan::sync(0);
+    let mut n_wait = 1 + generate_samples(samples_tx, done_tx.clone(), client.sample_rate(), wavs);
+    play(client, done_tx, samples_rx);
+    while n_wait > 0 {
+        done_rx.recv();
+        n_wait -= 1;
+    }
+}
+
+fn grain_samples(grain_ms: usize, sr: u32) -> usize {
+    let smpls_per_ms = (sr as f64) / 1000.0;
+    let smpls_per_grain = (grain_ms as f64) * smpls_per_ms;
+    smpls_per_grain.round() as usize
+}
+
+fn generate_samples(
+    samples_tx: chan::Sender<Vec<f32>>,
+    done_tx: chan::Sender<()>,
+    sink_sr: usize,
+    wavs: Vec<WavDesc>,
+) -> u32 {
+    println!("generate_samples using wav {:?} of length {}", &wavs[0].path, &wavs[0].n_samples);
+    thread::spawn(move || {
+        let mut r = hound::WavReader::open(&wavs[0].path).expect("opening WAV file");
+        let src_sr = r.spec().sample_rate;
+        let n_src_grain = grain_samples(GRAIN_MS, src_sr);
+        let converter =
+            Samplerate::new(ConverterType::SincBestQuality, src_sr, sink_sr as u32, 2).unwrap();
+        let mut eof = false;
+        while !eof {
+            let mut grain_samples: Vec<f32> = Vec::new();
+            for _ in 0..n_src_grain {
+                let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
+                    r.samples();
+                match samples.take(1).last() {
+                    Some(res) => {
+                        grain_samples.push((res.expect("sample") as f32) * (i16::MAX as f32))
+                    }
+                    None => {
+                        println!("EOF on input WAV");
+                        eof = true;
+                        break;
+                    }
+                }
+            }
+            println!("grain_samples length before sr conversion: {}", grain_samples.len());
+            let grain_samples = converter
+                .process_last(&grain_samples[..])
+                .expect("convert sr");
+            println!("sending grain_samples of len {}", grain_samples.len());
+            samples_tx.send(grain_samples);
+        }
+        println!("generate_samples is done");
+        done_tx.send(());
+    });
+
+    N_GRAINS
 }
 
 fn main() {
@@ -236,7 +253,7 @@ fn main() {
         let wdescs_rx = wdescs_rx;
         let done_tx = done_tx.clone();
         thread::spawn(move || {
-            consume(N_PRODUCERS, wdescs_rx);
+            use_wavs(N_PRODUCERS, wdescs_rx);
             done_tx.send(N_PRODUCERS); // consumer ID is one greater than max producer ID
         });
     }
