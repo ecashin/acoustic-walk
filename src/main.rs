@@ -102,7 +102,7 @@ struct WavDesc {
     max_amplitude: u32,
 }
 
-fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Receiver<Vec<f32>>) {
+fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Receiver<(usize, Vec<f32>)>) {
     println!("play starting");
     let mut out_left = client
         .register_port("acouwalk_out_L", jack::AudioOut::default())
@@ -110,25 +110,51 @@ fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Recei
     let mut out_right = client
         .register_port("acouwalk_out_R", jack::AudioOut::default())
         .unwrap();
-    let n_channels = 2;
+    let mut n_channels = 2;
     let mut samples: Vec<f32> = Vec::new();
+    let (playdone_tx, playdone_rx) = chan::sync(0);
+    let jack_sr = client.sample_rate();
+    let mut consumed = 0;
     let process = jack::ClosureProcessHandler::new(
         move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
             let outl = out_left.as_mut_slice(ps);
             let outr = out_right.as_mut_slice(ps);
             let n = outl.len();
-            if samples.len() < n * 2 {
+            if consumed > jack_sr {
+                samples = samples.split_off(consumed);
+                consumed = 0;
+            }
+            if false {
+                // Or you could skip all non-stereo WAVs during collection!
+                // Not OK to mix interleaved stereo and mono in the same buffer below.
+                panic!("all the audio received here should be stereo");
+            }
+            if samples.len() - consumed < n * n_channels {
                 match samples_rx.recv() {
-                    Some(mut new_samples) => samples.append(&mut new_samples),
-                    None => return jack::Control::Quit,
+                    Some((n_src_channels, mut new_samples)) => {
+                        println!("play received {} {}-channel samples", new_samples.len(), n_src_channels);
+                        n_channels = n_src_channels;
+                        samples.append(&mut new_samples)
+                    },
+                    None => {
+                        playdone_tx.send(());
+                        return jack::Control::Quit
+                    },
                 }
             }
-            let n = std::cmp::min(n, samples.len() / 2);
+            let n = std::cmp::min(n, samples.len() / n_channels);
+            // println!("n:{}", n);
             for i in 0..n {
-                let src_off = i * n_channels;
+                let src_off = consumed + i * n_channels;
                 outl[i] = samples[src_off];
-                outr[i] = samples[src_off + 1];
+                if n_channels == 1 {
+                    outr[i] = samples[src_off];
+                } else {
+                    outr[i] = samples[src_off + 1];
+                }
+                // println!("outl[{}], outr[{}] <- {}, {}", i, i, outl[i], outr[i]);
             }
+            consumed += n * n_channels;
 
             // Continue as normal
             jack::Control::Continue
@@ -138,6 +164,8 @@ fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Recei
     // 4. activate the client
     let active_client = client.activate_async((), process).unwrap();
     // processing starts here
+
+    let _ = playdone_rx.recv();
 
     // 6. Optional deactivate. Not required since active_client will deactivate on
     // drop, though explicit deactivate may help you identify errors in
@@ -183,7 +211,7 @@ fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
     println!("new client:{:?} status:{:?}", client, status);
 
-    let (samples_tx, samples_rx) = chan::sync(100);
+    let (samples_tx, samples_rx) = chan::sync(5);
     let (done_tx, done_rx) = chan::sync(0);
     let mut n_wait = 1 + generate_samples(samples_tx, done_tx.clone(), client.sample_rate(), wavs);
     play(client, done_tx, samples_rx);
@@ -200,17 +228,20 @@ fn grain_samples(grain_ms: usize, sr: u32) -> usize {
 }
 
 fn generate_samples(
-    samples_tx: chan::Sender<Vec<f32>>,
+    samples_tx: chan::Sender<(usize, Vec<f32>)>,
     done_tx: chan::Sender<()>,
     sink_sr: usize,
     wavs: Vec<WavDesc>,
 ) -> u32 {
-    println!("generate_samples using wav {:?} of length {}", &wavs[0].path, &wavs[0].n_samples);
+    println!("generate_samples using wav {:?} of length {}", &wavs[1].path, &wavs[1].n_samples);
     thread::spawn(move || {
-        let mut r = hound::WavReader::open(&wavs[0].path).expect("opening WAV file");
+        let mut r = hound::WavReader::open(&wavs[1].path).expect("opening WAV file");
+        let n_channels = r.spec().channels;  // TODO: Use for each WAV
         let src_sr = r.spec().sample_rate;
         let n_src_grain = grain_samples(GRAIN_MS, src_sr);
-        let converter =
+        let converter1 =
+            Samplerate::new(ConverterType::SincBestQuality, src_sr, sink_sr as u32, 1).unwrap();
+        let converter2 =
             Samplerate::new(ConverterType::SincBestQuality, src_sr, sink_sr as u32, 2).unwrap();
         let mut eof = false;
         while !eof {
@@ -220,7 +251,9 @@ fn generate_samples(
                     r.samples();
                 match samples.take(1).last() {
                     Some(res) => {
-                        grain_samples.push((res.expect("sample") as f32) * (i16::MAX as f32))
+                        let s = res.expect("sample") as f32;
+                        let s = s / (i16::MAX as f32);
+                        grain_samples.push(s)
                     }
                     None => {
                         println!("EOF on input WAV");
@@ -229,12 +262,17 @@ fn generate_samples(
                     }
                 }
             }
-            println!("grain_samples length before sr conversion: {}", grain_samples.len());
+            let converter = match n_channels {
+                1 => &converter1,
+                2 => &converter2,
+                _ => panic!("more than two channels unsupported")
+            };
+            // println!("grain_samples length before sr conversion: {}", grain_samples.len());
             let grain_samples = converter
-                .process_last(&grain_samples[..])
+                .process(&grain_samples[..])
                 .expect("convert sr");
             println!("sending grain_samples of len {}", grain_samples.len());
-            samples_tx.send(grain_samples);
+            samples_tx.send((n_channels as usize, grain_samples));
         }
         println!("generate_samples is done");
         done_tx.send(());
