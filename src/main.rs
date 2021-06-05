@@ -1,10 +1,7 @@
 use probability::prelude::*;
-// use rand::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
 use samplerate::{convert, ConverterType};
-use std::fs::File;
-use std::io::BufReader;
 use std::{env, path, thread};
 use walkdir::WalkDir;
 
@@ -32,14 +29,16 @@ impl Grain {
             len: len,
         }
     }
-    fn land(&mut self, n: u32) {
+    // Toss this grain in the air and let it randomly land somewhere.
+    fn toss(&mut self, n: u32) {
         let mut rng = rand::thread_rng();
         let g_right = 1.0 - MIN_GRAIN_SIZE_FRACTION;
         let g_right_fraction = rand_distr::Uniform::from(0.0..1.0).sample(&mut rng);
+        // The random "extra" above-minimum length avoids grain synchronization.
         let g_extra = g_right * g_right_fraction;
         let g_size = self.max_len as f32 * (MIN_GRAIN_SIZE_FRACTION + g_extra);
         self.len = g_size as u32;
-        let rounding_error = 1;  // one-sample safety margin
+        let rounding_error = 1; // one-sample safety margin
         self.start = rand_distr::Uniform::from(0..n - rounding_error - self.len).sample(&mut rng);
     }
     // https://en.wikipedia.org/wiki/Window_function#Tukey_window
@@ -62,20 +61,6 @@ impl Grain {
     }
 }
 
-// return max i16 sample as f32 fraction of 1.0
-fn max_amplitude(mut rd: hound::WavReader<BufReader<File>>) -> f32 {
-    let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> = rd.samples();
-    let mut max: i16 = 0;
-    for s in samples {
-        let s = s.expect("expected i16 sample");
-        let s = s as i16;
-        if s.abs() > max {
-            max = s.abs();
-        }
-    }
-    max as f32 / (i16::MAX as f32)
-}
-
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
         if reader.spec().channels != 2 {
@@ -85,7 +70,6 @@ fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
                 path,
                 n_samples: reader.duration(),
                 spec: reader.spec(),
-                max_amplitude: None,
             })
         }
     } else {
@@ -93,7 +77,7 @@ fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     }
 }
 
-fn do_work(
+fn survey_wavs(
     worker_id: u32,
     paths_rx: chan::Receiver<path::PathBuf>,
     wdescs_tx: chan::Sender<Option<WavDesc>>,
@@ -119,18 +103,12 @@ fn do_work(
 
 #[derive(Clone)]
 struct WavDesc {
-    // reader: hound::WavReader<BufReader<File>>,
     path: path::PathBuf,
     n_samples: u32,
     spec: hound::WavSpec,
-    max_amplitude: Option<f32>,
 }
 
-fn play(
-    client: jack::Client,
-    done_tx: chan::Sender<()>,
-    samples_rx: chan::Receiver<Vec<f32>>,
-) {
+fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Receiver<Vec<f32>>) {
     println!("play starting");
     let mut out_left = client
         .register_port("acouwalk_out_L", jack::AudioOut::default())
@@ -151,13 +129,11 @@ fn play(
                 samples = samples.split_off(consumed);
                 consumed = 0;
             }
-            if samples.len() - consumed < n * 2 {  // (2 for stereo)
+            if samples.len() - consumed < n * 2 {
+                // (2 for stereo)
                 match samples_rx.recv() {
                     Some(mut new_samples) => {
-                        println!(
-                            "play received {} stereo samples",
-                            new_samples.len() / 2
-                        );
+                        println!("play received {} stereo samples", new_samples.len() / 2);
                         samples.append(&mut new_samples)
                     }
                     None => {
@@ -168,32 +144,21 @@ fn play(
                 }
             }
             let n = std::cmp::min(n, samples.len() / 2);
-            // println!("n:{}", n);
+
             for i in 0..n {
                 let src_off = consumed + i * 2;
                 outl[i] = samples[src_off];
                 outr[i] = samples[src_off + 1];
-                // println!("outl[{}], outr[{}] <- {}, {}", i, i, outl[i], outr[i]);
             }
             consumed += n * 2;
-
-            // Continue as normal
             jack::Control::Continue
         },
     );
 
-    // 4. activate the client
     let active_client = client.activate_async((), process).unwrap();
-    // processing starts here
-
     let _ = jackdone_rx.recv();
     println!("play received playdone message from JACK handler");
-
-    // 6. Optional deactivate. Not required since active_client will deactivate on
-    // drop, though explicit deactivate may help you identify errors in
-    // deactivate.
     active_client.deactivate().unwrap();
-
     println!("play is done");
     done_tx.send(());
 }
@@ -267,7 +232,7 @@ fn make_grains(
             let src_sr = r.spec().sample_rate;
             let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);
             for _ in 0..ttl {
-                g.land(wav.n_samples);
+                g.toss(wav.n_samples);
                 r.seek(g.start).ok();
                 let src_samples: Vec<f32> = r
                     .samples()
@@ -282,11 +247,12 @@ fn make_grains(
                     2,
                     ConverterType::SincBestQuality,
                     &src_samples[..],
-                ).expect("converting sample rate");
+                )
+                .expect("converting sample rate");
                 send_buf.append(&mut sink_samples);
                 if send_buf.len() >= GRAIN_BUF_N_SAMPLES {
-                    let send_part: Vec<f32> =
-                        send_buf.iter()
+                    let send_part: Vec<f32> = send_buf
+                        .iter()
                         .take(GRAIN_BUF_N_SAMPLES)
                         .map(|e| *e)
                         .collect();
@@ -295,7 +261,6 @@ fn make_grains(
                         send_buf[i] = send_buf[j];
                     }
                     send_buf.truncate(new_len);
-                    // println!("grain maker {} sending {} samples", grain_maker_id, send_part.len() / 2);
                     grains_tx.send(send_part);
                 }
             }
@@ -309,19 +274,13 @@ fn mix(bufs: Vec<Vec<f32>>) -> Vec<f32> {
     let len = bufs[0].len();
     let mut mixbuf: Vec<f32> = Vec::new();
     for i in 0..len {
-        let s: f32 = bufs.iter()
-        .map(|buf: &Vec<f32>| buf[i])
-        .sum();
+        let s: f32 = bufs.iter().map(|buf: &Vec<f32>| buf[i]).sum();
         mixbuf.push(s / n as f32);
     }
     mixbuf
 }
 
-fn generate_samples(
-    samples_tx: chan::Sender<Vec<f32>>,
-    sink_sr: usize,
-    wavs: Vec<WavDesc>,
-) -> u32 {
+fn generate_samples(samples_tx: chan::Sender<Vec<f32>>, sink_sr: usize, wavs: Vec<WavDesc>) -> u32 {
     let mut grains_rxs: Vec<chan::Receiver<Vec<f32>>> = Vec::new();
     for i in 0..N_GRAINS {
         let (grains_tx, grains_rx) = chan::sync(0);
@@ -342,7 +301,10 @@ fn generate_samples(
             }
             if bufs.len() > 0 {
                 let mixed = mix(bufs);
-                println!("generate_samples sending {} mixed stereo samples", mixed.len() / 2);
+                println!(
+                    "generate_samples sending {} mixed stereo samples",
+                    mixed.len() / 2
+                );
                 samples_tx.send(mixed);
             } else {
                 println!("generate_samples without anything to send");
@@ -376,7 +338,7 @@ fn main() {
             let done_tx = done_tx.clone();
             let wdescs_tx = wdescs_tx.clone();
             thread::spawn(move || {
-                do_work(w, dirs_rx, wdescs_tx, done_tx);
+                survey_wavs(w, dirs_rx, wdescs_tx, done_tx);
             });
         }
         for d in dirs {
