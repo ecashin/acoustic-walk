@@ -155,8 +155,8 @@ fn play(
                 match samples_rx.recv() {
                     Some(mut new_samples) => {
                         println!(
-                            "play received {} samples",
-                            new_samples.len()
+                            "play received {} stereo samples",
+                            new_samples.len() / 2
                         );
                         samples.append(&mut new_samples)
                     }
@@ -233,7 +233,7 @@ fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
         jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
     println!("new client:{:?} status:{:?}", client, status);
 
-    let (samples_tx, samples_rx) = chan::sync(5);
+    let (samples_tx, samples_rx) = chan::sync(2);
     let (playdone_tx, playdone_rx) = chan::sync(0);
     generate_samples(samples_tx, client.sample_rate(), wavs);
     play(client, playdone_tx, samples_rx);
@@ -262,6 +262,7 @@ fn make_grains(
                 .last()
                 .unwrap();
             let wav = &wavs[which];
+            println!("grain maker {} chose WAV {:?}", grain_maker_id, wav.path);
             let mut r = hound::WavReader::open(wav.path.clone()).ok().unwrap();
             let src_sr = r.spec().sample_rate;
             let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);
@@ -323,7 +324,7 @@ fn generate_samples(
 ) -> u32 {
     let mut grains_rxs: Vec<chan::Receiver<Vec<f32>>> = Vec::new();
     for i in 0..N_GRAINS {
-        let (grains_tx, grains_rx) = chan::sync(2);
+        let (grains_tx, grains_rx) = chan::sync(0);
         make_grains(i, &wavs, grains_tx, sink_sr);
         grains_rxs.push(grains_rx);
     }
