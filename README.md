@@ -6,6 +6,9 @@ as in the example below.
 
     cargo run ~/samples-ecashin-orig/Zoom-H5
 
+The application is designed to run until stopped
+with control-c.
+
 ## JACK
 
 The applications sends stereo audio
