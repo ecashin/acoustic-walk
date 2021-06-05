@@ -78,12 +78,16 @@ fn max_amplitude(mut rd: hound::WavReader<BufReader<File>>) -> f32 {
 
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
-        Some(WavDesc {
-            path,
-            n_samples: reader.duration(),
-            spec: reader.spec(),
-            max_amplitude: None,
-        })
+        if reader.spec().channels != 2 {
+            None
+        } else {
+            Some(WavDesc {
+                path,
+                n_samples: reader.duration(),
+                spec: reader.spec(),
+                max_amplitude: None,
+            })
+        }
     } else {
         None
     }
@@ -125,7 +129,7 @@ struct WavDesc {
 fn play(
     client: jack::Client,
     done_tx: chan::Sender<()>,
-    samples_rx: chan::Receiver<(usize, Vec<f32>)>,
+    samples_rx: chan::Receiver<Vec<f32>>,
 ) {
     println!("play starting");
     let mut out_left = client
@@ -134,7 +138,6 @@ fn play(
     let mut out_right = client
         .register_port("acouwalk_out_R", jack::AudioOut::default())
         .unwrap();
-    let mut n_channels = 2;
     let mut samples: Vec<f32> = Vec::new();
     let (jackdone_tx, jackdone_rx) = chan::sync(0);
     let jack_sr = client.sample_rate();
@@ -148,20 +151,13 @@ fn play(
                 samples = samples.split_off(consumed);
                 consumed = 0;
             }
-            if samples.len() - consumed < n * n_channels {
+            if samples.len() - consumed < n * 2 {  // (2 for stereo)
                 match samples_rx.recv() {
-                    Some((n_src_channels, mut new_samples)) => {
+                    Some(mut new_samples) => {
                         println!(
-                            "play received {} {}-channel samples",
-                            new_samples.len(),
-                            n_src_channels
+                            "play received {} samples",
+                            new_samples.len()
                         );
-                        n_channels = n_src_channels;
-                        if n_channels != 2 {
-                            // Or you could skip all non-stereo WAVs during collection!
-                            // Not OK to mix interleaved stereo and mono in the same buffer below.
-                            panic!("all the audio received here should be stereo");
-                        }
                         samples.append(&mut new_samples)
                     }
                     None => {
@@ -171,19 +167,15 @@ fn play(
                     }
                 }
             }
-            let n = std::cmp::min(n, samples.len() / n_channels);
+            let n = std::cmp::min(n, samples.len() / 2);
             // println!("n:{}", n);
             for i in 0..n {
-                let src_off = consumed + i * n_channels;
+                let src_off = consumed + i * 2;
                 outl[i] = samples[src_off];
-                if n_channels == 1 {
-                    outr[i] = samples[src_off];
-                } else {
-                    outr[i] = samples[src_off + 1];
-                }
+                outr[i] = samples[src_off + 1];
                 // println!("outl[{}], outr[{}] <- {}, {}", i, i, outl[i], outr[i]);
             }
-            consumed += n * n_channels;
+            consumed += n * 2;
 
             // Continue as normal
             jack::Control::Continue
@@ -324,7 +316,7 @@ fn mix(bufs: Vec<Vec<f32>>) -> Vec<f32> {
 }
 
 fn generate_samples(
-    samples_tx: chan::Sender<(usize, Vec<f32>)>,
+    samples_tx: chan::Sender<Vec<f32>>,
     sink_sr: usize,
     wavs: Vec<WavDesc>,
 ) -> u32 {
@@ -347,7 +339,7 @@ fn generate_samples(
                 }
             }
             if bufs.len() > 0 {
-                samples_tx.send((2, mix(bufs)));
+                samples_tx.send(mix(bufs));
             }
         }
     });
