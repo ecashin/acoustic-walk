@@ -2,7 +2,7 @@ use probability::prelude::*;
 // use rand::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
-use samplerate::{convert, ConverterType, Samplerate};
+use samplerate::{convert, ConverterType};
 use std::fs::File;
 use std::io::BufReader;
 use std::{env, path, thread};
@@ -12,7 +12,7 @@ const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
 const N_PRODUCERS: u32 = 10;
 const N_GRAINS: u32 = 5;
 const GRAIN_MS: u32 = 1000;
-const GRAIN_BUF_N_SAMPLES: usize = 2048;
+const GRAIN_BUF_N_SAMPLES: usize = 1024 * 1024;
 const MIN_GRAIN_SIZE_FRACTION: f32 = 0.6;
 const WAV_MAX_TTL: u32 = 10;
 
@@ -37,7 +37,7 @@ impl Grain {
         let g_right = 1.0 - MIN_GRAIN_SIZE_FRACTION;
         let g_right_fraction = rand_distr::Uniform::from(0.0..1.0).sample(&mut rng);
         let g_extra = g_right * g_right_fraction;
-        let g_size = self.len as f32 * (MIN_GRAIN_SIZE_FRACTION + g_extra);
+        let g_size = self.max_len as f32 * (MIN_GRAIN_SIZE_FRACTION + g_extra);
         self.len = g_size as u32;
         let rounding_error = 1;  // one-sample safety margin
         self.start = rand_distr::Uniform::from(0..n - rounding_error - self.len).sample(&mut rng);
@@ -270,10 +270,10 @@ fn make_grains(
                 r.seek(g.start).ok();
                 let src_samples: Vec<f32> = r
                     .samples()
-                    .take(g.len as usize)
+                    .take((g.len * 2) as usize)
                     .map(|e: Result<i16, hound::Error>| e.ok().unwrap() as f32 / i16::MAX as f32)
                     .enumerate()
-                    .map(|(i, s)| s * g.amplitude(i, None))
+                    .map(|(i, s)| s * g.amplitude(i / 2, None))
                     .collect();
                 let mut sink_samples = convert(
                     src_sr,
@@ -294,6 +294,7 @@ fn make_grains(
                         send_buf[i] = send_buf[j];
                     }
                     send_buf.truncate(new_len);
+                    // println!("grain maker {} sending {} samples", grain_maker_id, send_part.len() / 2);
                     grains_tx.send(send_part);
                 }
             }
@@ -339,7 +340,11 @@ fn generate_samples(
                 }
             }
             if bufs.len() > 0 {
-                samples_tx.send(mix(bufs));
+                let mixed = mix(bufs);
+                println!("generate_samples sending {} mixed stereo samples", mixed.len() / 2);
+                samples_tx.send(mixed);
+            } else {
+                println!("generate_samples without anything to send");
             }
         }
     });
