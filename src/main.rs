@@ -11,15 +11,39 @@ use walkdir::WalkDir;
 const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
 const N_PRODUCERS: u32 = 10;
 const N_GRAINS: u32 = 5;
-const GRAIN_MS: usize = 1000;
+const GRAIN_MS: u32 = 1000;
+const GRAIN_BUF_N_SAMPLES: usize = 2048;
+const MIN_GRAIN_SIZE_FRACTION: f32 = 0.6;
+const WAV_MAX_TTL: u32 = 10;
 
 struct Grain {
     start: u32,
-    pos: u32,
-    end: u32,
+    pos: u32, // current position in grain
+    len: u32,
+    max_len: u32,
 }
 
 impl Grain {
+    fn new(sr: u32) -> Self {
+        let sr_ms = sr / 1000;
+        let len = GRAIN_MS * sr_ms;
+        Grain {
+            start: 0,
+            pos: 0,
+            max_len: len,
+            len: len,
+        }
+    }
+    fn land(&mut self, n: u32) {
+        let mut rng = rand::thread_rng();
+        let g_right = 1.0 - MIN_GRAIN_SIZE_FRACTION;
+        let g_right_fraction = rand_distr::Uniform::from(0.0..1.0).sample(&mut rng);
+        let g_extra = g_right * g_right_fraction;
+        let g_size = self.len as f32 * (MIN_GRAIN_SIZE_FRACTION + g_extra);
+        self.len = g_size as u32;
+        self.start = rand_distr::Uniform::from(0..n - self.len).sample(&mut rng);
+        self.pos = 0;
+    }
     // https://en.wikipedia.org/wiki/Window_function#Tukey_window
     fn amplitude(&self, alpha: Option<f32>) -> f32 {
         let alpha = match alpha {
@@ -28,7 +52,7 @@ impl Grain {
         };
 
         let n = self.pos as f32;
-        let len = (self.end - self.start) as f32;
+        let len = self.len as f32;
         let n = if n >= (len / 2.0) { len - n } else { n };
 
         if n < alpha * len / 2.0 {
@@ -40,20 +64,18 @@ impl Grain {
     }
 }
 
-fn max_amplitude(mut rd: hound::WavReader<BufReader<File>>) -> u32 {
-    if true {
-        return 0; // fast and wrong, for now
-    }
+// return max i16 sample as f32 fraction of 1.0
+fn max_amplitude(mut rd: hound::WavReader<BufReader<File>>) -> f32 {
     let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> = rd.samples();
-    let mut max: i64 = 0;
+    let mut max: i16 = 0;
     for s in samples {
         let s = s.expect("expected i16 sample");
-        let s = s as i64;
+        let s = s as i16;
         if s.abs() > max {
             max = s.abs();
         }
     }
-    max as u32
+    max as f32 / (i16::MAX as f32)
 }
 
 fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
@@ -62,7 +84,7 @@ fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
             path,
             n_samples: reader.duration(),
             spec: reader.spec(),
-            max_amplitude: max_amplitude(reader),
+            max_amplitude: None,
         })
     } else {
         None
@@ -99,10 +121,14 @@ struct WavDesc {
     path: path::PathBuf,
     n_samples: u32,
     spec: hound::WavSpec,
-    max_amplitude: u32,
+    max_amplitude: Option<f32>,
 }
 
-fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Receiver<(usize, Vec<f32>)>) {
+fn play(
+    client: jack::Client,
+    done_tx: chan::Sender<()>,
+    samples_rx: chan::Receiver<(usize, Vec<f32>)>,
+) {
     println!("play starting");
     let mut out_left = client
         .register_port("acouwalk_out_L", jack::AudioOut::default())
@@ -127,7 +153,11 @@ fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Recei
             if samples.len() - consumed < n * n_channels {
                 match samples_rx.recv() {
                     Some((n_src_channels, mut new_samples)) => {
-                        println!("play received {} {}-channel samples", new_samples.len(), n_src_channels);
+                        println!(
+                            "play received {} {}-channel samples",
+                            new_samples.len(),
+                            n_src_channels
+                        );
                         n_channels = n_src_channels;
                         if n_channels != 2 {
                             // Or you could skip all non-stereo WAVs during collection!
@@ -135,12 +165,12 @@ fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Recei
                             panic!("all the audio received here should be stereo");
                         }
                         samples.append(&mut new_samples)
-                    },
+                    }
                     None => {
                         println!("play received EOF from samples channel");
                         jackdone_tx.send(());
-                        return jack::Control::Quit
-                    },
+                        return jack::Control::Quit;
+                    }
                 }
             }
             let n = std::cmp::min(n, samples.len() / n_channels);
@@ -227,16 +257,68 @@ fn grain_samples(grain_ms: usize, sr: u32) -> usize {
     smpls_per_grain.round() as usize
 }
 
+fn make_grains(
+    grain_maker_id: u32,
+    wavs: &Vec<WavDesc>,
+    grains_tx: chan::Sender<f32>,
+    sink_sr: usize,
+) {
+    let wavs = wavs.clone();
+    let g = Grain::new(sink_sr as u32);
+    thread::spawn(move || {
+        let mut rng = rand::thread_rng();
+        loop {
+            let which = select_wavs(&wavs, 1)
+                .unwrap()
+                .iter()
+                .take(1)
+                .last()
+                .unwrap();
+            let wav = &wavs[*which];
+            let r = hound::WavReader::open(wav.path).ok().unwrap();
+            let src_sr = r.spec().sample_rate;
+            let src_per_sink = src_sr as f32 * sink_sr as f32;
+            let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);
+            for _ in 0..ttl {
+                g.land(wav.n_samples);
+                let n_read = (g.len as f32 * src_per_sink).ceil() as usize;
+                r.seek(g.start);
+                let src_samples: Vec<f32> = r
+                    .samples()
+                    .take(n_read)
+                    .map(|e: Result<i16, hound::Error>| e.ok().unwrap() as f32 / i16::MAX as f32)
+                    .collect();
+                let sink_samples = convert(
+                    src_sr,
+                    sink_sr as u32,
+                    2,
+                    ConverterType::SincBestQuality,
+                    &src_samples[..],
+                );
+                // apply grain envelope
+                // push to vec
+                // split and send data if enough for buf
+            }
+        }
+    });
+}
+
 fn generate_samples(
     samples_tx: chan::Sender<(usize, Vec<f32>)>,
     sink_sr: usize,
-    mut wavs: Vec<WavDesc>,
+    wavs: Vec<WavDesc>,
 ) -> u32 {
-    wavs.sort_by(|a, b| a.n_samples.partial_cmp(&b.n_samples).unwrap());
-    println!("generate_samples using wav {:?} of length {}", &wavs[0].path, &wavs[0].n_samples);
+    let mut grains_rxs: Vec<chan::Receiver<f32>> = Vec::new();
+    for i in 0..N_GRAINS {
+        let (grains_tx, grains_rx) = chan::sync(2);
+        make_grains(i, &wavs, grains_tx, sink_sr);
+        grains_rxs.push(grains_rx);
+    }
+    // now each grain maker will send JACK-ready samples in chunks mixed below
+
     thread::spawn(move || {
         let mut r = hound::WavReader::open(&wavs[0].path).expect("opening WAV file");
-        let n_channels = r.spec().channels;  // TODO: Use for each WAV
+        let n_channels = r.spec().channels; // TODO: Use for each WAV
         let src_sr = r.spec().sample_rate;
         let n_src_grain = grain_samples(GRAIN_MS, src_sr);
         let converter1 =
@@ -265,12 +347,10 @@ fn generate_samples(
             let converter = match n_channels {
                 1 => &converter1,
                 2 => &converter2,
-                _ => panic!("more than two channels unsupported")
+                _ => panic!("more than two channels unsupported"),
             };
             // println!("grain_samples length before sr conversion: {}", grain_samples.len());
-            let grain_samples = converter
-                .process(&grain_samples[..])
-                .expect("convert sr");
+            let grain_samples = converter.process(&grain_samples[..]).expect("convert sr");
             println!("sending grain_samples of len {}", grain_samples.len());
             samples_tx.send((n_channels as usize, grain_samples));
         }
