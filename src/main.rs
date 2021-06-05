@@ -1,3 +1,4 @@
+use clap::App;
 use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
@@ -316,7 +317,26 @@ fn generate_samples(samples_tx: chan::Sender<Vec<f32>>, sink_sr: usize, wavs: Ve
 }
 
 fn main() {
-    let dirs: Vec<String> = env::args().skip(1).collect();
+    let matches = App::new("acouwalk")
+        .author("Ed.Cashin@acm.org")
+        .about("stereo granular streamer for JACK")
+        .arg(clap::Arg::from_usage(
+            "-e --exclude=[FILE] 'Read excluded WAVs from file'",
+        ))
+        .arg(
+            clap::Arg::with_name("dirs")
+                .required(true)
+                .min_values(1)
+                .help("<WAV-directory>..."),
+        )
+        .get_matches();
+
+    let mut excluded_wavs: Vec<String> = Vec::new();
+    if let Some(e) = matches.value_of("exclude") {
+        println!("e:{}", e);
+        excluded_wavs.push(String::from("whoa."));
+        return;
+    }
 
     let (done_tx, done_rx) = chan::sync(0); // worker completion channel
     let (wdescs_tx, wdescs_rx) = chan::sync(0); // wav description channel
@@ -329,22 +349,24 @@ fn main() {
             done_tx.send(N_PRODUCERS); // consumer ID is one greater than max producer ID
         });
     }
-
-    {
-        // At the end of this scope, dirs_tx dropped - we're done sending directories.
-        let (dirs_tx, dirs_rx) = chan::sync(0);
-        for w in 0..N_PRODUCERS {
-            let dirs_rx = dirs_rx.clone();
-            let done_tx = done_tx.clone();
-            let wdescs_tx = wdescs_tx.clone();
-            thread::spawn(move || {
-                survey_wavs(w, dirs_rx, wdescs_tx, done_tx);
-            });
-        }
-        for d in dirs {
-            for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
-                let p = path::PathBuf::from(entry.path());
-                dirs_tx.send(p);
+    if let Some(dirs) = matches.values_of("dirs") {
+        let dirs: Vec<&str> = dirs.collect();
+        {
+            // At the end of this scope, dirs_tx dropped - we're done sending directories.
+            let (dirs_tx, dirs_rx) = chan::sync(0);
+            for w in 0..N_PRODUCERS {
+                let dirs_rx = dirs_rx.clone();
+                let done_tx = done_tx.clone();
+                let wdescs_tx = wdescs_tx.clone();
+                thread::spawn(move || {
+                    survey_wavs(w, dirs_rx, wdescs_tx, done_tx);
+                });
+            }
+            for d in dirs {
+                for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
+                    let p = path::PathBuf::from(entry.path());
+                    dirs_tx.send(p);
+                }
             }
         }
     }

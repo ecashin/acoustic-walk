@@ -7,6 +7,7 @@ edition = "2018"
 
 [dependencies]
 chan = "0.1.23"
+clap = "2.33.3"
 hound = "3.4.0"
 jack = "0.7.1"
 probability = "0.17.0"
