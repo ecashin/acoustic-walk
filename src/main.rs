@@ -249,12 +249,6 @@ fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
     println!("use_wavs received playdone message");
 }
 
-fn grain_samples(grain_ms: usize, sr: u32) -> usize {
-    let smpls_per_ms = (sr as f64) / 1000.0;
-    let smpls_per_grain = (grain_ms as f64) * smpls_per_ms;
-    smpls_per_grain.round() as usize
-}
-
 fn make_grains(
     grain_maker_id: u32,
     wavs: &Vec<WavDesc>,
@@ -315,6 +309,20 @@ fn make_grains(
     });
 }
 
+fn mix(bufs: Vec<Vec<f32>>) -> Vec<f32> {
+    let n = bufs.len();
+    assert_ne!(n, 0);
+    let len = bufs[0].len();
+    let mut mixbuf: Vec<f32> = Vec::new();
+    for i in 0..len {
+        let s: f32 = bufs.iter()
+        .map(|buf: &Vec<f32>| buf[i])
+        .sum();
+        mixbuf.push(s / n as f32);
+    }
+    mixbuf
+}
+
 fn generate_samples(
     samples_tx: chan::Sender<(usize, Vec<f32>)>,
     sink_sr: usize,
@@ -326,45 +334,21 @@ fn generate_samples(
         make_grains(i, &wavs, grains_tx, sink_sr);
         grains_rxs.push(grains_rx);
     }
+    let mut n_grain_makers = N_GRAINS;
     // now each grain maker will send JACK-ready samples in chunks mixed below
 
     thread::spawn(move || {
-        let mut r = hound::WavReader::open(&wavs[0].path).expect("opening WAV file");
-        let n_channels = r.spec().channels; // TODO: Use for each WAV
-        let src_sr = r.spec().sample_rate;
-        let n_src_grain = grain_samples(GRAIN_MS as usize, src_sr);
-        let converter1 =
-            Samplerate::new(ConverterType::SincBestQuality, src_sr, sink_sr as u32, 1).unwrap();
-        let converter2 =
-            Samplerate::new(ConverterType::SincBestQuality, src_sr, sink_sr as u32, 2).unwrap();
-        let mut eof = false;
-        while !eof {
-            let mut grain_samples: Vec<f32> = Vec::new();
-            for _ in 0..n_src_grain {
-                let samples: hound::WavSamples<'_, std::io::BufReader<std::fs::File>, i16> =
-                    r.samples();
-                match samples.take(1).last() {
-                    Some(res) => {
-                        let s = res.expect("sample") as f32;
-                        let s = s / (i16::MAX as f32);
-                        grain_samples.push(s)
-                    }
-                    None => {
-                        println!("EOF on input WAV");
-                        eof = true;
-                        break;
-                    }
+        while n_grain_makers > 0 {
+            let mut bufs: Vec<Vec<f32>> = Vec::new();
+            for i in 0..N_GRAINS {
+                match grains_rxs[i as usize].recv() {
+                    None => n_grain_makers -= 1,
+                    Some(buf) => bufs.push(buf),
                 }
             }
-            let converter = match n_channels {
-                1 => &converter1,
-                2 => &converter2,
-                _ => panic!("more than two channels unsupported"),
-            };
-            // println!("grain_samples length before sr conversion: {}", grain_samples.len());
-            let grain_samples = converter.process(&grain_samples[..]).expect("convert sr");
-            println!("sending grain_samples of len {}", grain_samples.len());
-            samples_tx.send((n_channels as usize, grain_samples));
+            if bufs.len() > 0 {
+                samples_tx.send((2, mix(bufs)));
+            }
         }
     });
 
