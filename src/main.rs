@@ -3,7 +3,8 @@ use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
 use samplerate::{convert, ConverterType};
-use std::{env, path, thread};
+use std::{fs, io, path, thread};
+use std::io::prelude::*;
 use walkdir::WalkDir;
 
 const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
@@ -331,11 +332,17 @@ fn main() {
         )
         .get_matches();
 
-    let mut excluded_wavs: Vec<String> = Vec::new();
+    let mut excluded_wavs: Vec<std::path::PathBuf> = Vec::new();
     if let Some(e) = matches.value_of("exclude") {
         println!("e:{}", e);
-        excluded_wavs.push(String::from("whoa."));
-        return;
+        let f = fs::File::open(e).ok().unwrap();
+        let reader = io::BufReader::new(f);
+        for line in reader.lines() {
+            let line = line.ok().unwrap();
+            println!("excluding {}", line);
+            let path = std::path::Path::new(&line);
+            excluded_wavs.push(path.to_path_buf());
+        }
     }
 
     let (done_tx, done_rx) = chan::sync(0); // worker completion channel
@@ -364,8 +371,10 @@ fn main() {
             }
             for d in dirs {
                 for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
-                    let p = path::PathBuf::from(entry.path());
-                    dirs_tx.send(p);
+                    if ! excluded_wavs.iter().any(|i| i == entry.path()) {
+                        let p = path::PathBuf::from(entry.path());
+                        dirs_tx.send(p);
+                    }
                 }
             }
         }

@@ -9,6 +9,15 @@ as in the example below.
 The application is designed to run until stopped
 with control-c.
 
+## WAV Exclusion
+
+Multiple WAVs may be listed by absolute path
+in an exclude file specified via an option.
+Use `--` to separate acoustic-walk arguments
+from `cargo` arguments.
+
+    cargo run -- --exclude excluded.txt ~/samples-ecashin-orig/Zoom-H5
+
 ## JACK
 
 The applications sends stereo audio
