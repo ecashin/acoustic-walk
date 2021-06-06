@@ -1,5 +1,13 @@
 # Acoustic Walk
 
+## Context
+
+This is hastily made software
+targeted toward an art opening in Athens, Georgia,
+under carefully controlled circumstances.
+
+## Usage
+
 To play shuffled audio, specify a directory
 where a recursive file-tree walk will find stereo WAV files,
 as in the example below.
