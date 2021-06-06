@@ -3,8 +3,8 @@ use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
 use samplerate::{convert, ConverterType};
-use std::{fs, io, path, thread};
 use std::io::prelude::*;
+use std::{fs, io, path, thread};
 use walkdir::WalkDir;
 
 const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
@@ -236,22 +236,26 @@ fn make_grains(
             for _ in 0..ttl {
                 g.toss(wav.n_samples);
                 r.seek(g.start).ok();
-                let src_samples: Vec<f32> = r
+                let mut src_samples: Vec<f32> = r
                     .samples()
                     .take((g.len * 2) as usize)
                     .map(|e: Result<i16, hound::Error>| e.ok().unwrap() as f32 / i16::MAX as f32)
                     .enumerate()
                     .map(|(i, s)| s * g.amplitude(i / 2, None))
                     .collect();
-                let mut sink_samples = convert(
-                    src_sr,
-                    sink_sr as u32,
-                    2,
-                    ConverterType::SincBestQuality,
-                    &src_samples[..],
-                )
-                .expect("converting sample rate");
-                send_buf.append(&mut sink_samples);
+                if src_sr == sink_sr as u32 {
+                    send_buf.append(&mut src_samples);
+                } else {
+                    let mut sink_samples = convert(
+                        src_sr,
+                        sink_sr as u32,
+                        2,
+                        ConverterType::SincBestQuality,
+                        &src_samples[..],
+                    )
+                    .expect("converting sample rate");
+                    send_buf.append(&mut sink_samples);
+                }
                 if send_buf.len() >= GRAIN_BUF_N_SAMPLES {
                     let send_part: Vec<f32> = send_buf
                         .iter()
@@ -371,7 +375,7 @@ fn main() {
             }
             for d in dirs {
                 for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
-                    if ! excluded_wavs.iter().any(|i| i == entry.path()) {
+                    if !excluded_wavs.iter().any(|i| i == entry.path()) {
                         let p = path::PathBuf::from(entry.path());
                         dirs_tx.send(p);
                     }

@@ -36,3 +36,12 @@ To avoid audible buzzes from audio underruns,
 I am configuring JACK
 to use a relatively low sample rate of 44100,
 and a relatively large buffer size of 2048.
+
+The sample rate of 44100 allows acoustic-walk
+to skip the use of `samplerate::convert`
+when the WAV files also have a 44100 sample rate.
+The opportunity was exposed by using `flamegraph`
+and opening the resulting SVG file in a web browser.
+
+    cargo install flamegraph
+    flamegraph target/debug/acoustic-walk ~/samples-ecashin-orig/Zoom-H5
