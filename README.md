@@ -9,13 +9,16 @@ and to be used under carefully controlled circumstances.
 ## Usage
 
 To play shuffled audio, specify a directory
-where a recursive file-tree walk will find stereo WAV files,
+where a recursive file-tree walk will find stereo 16-bit WAV files,
 as in the example below.
 
     cargo run ~/samples-ecashin-orig/Zoom-H5
 
 The application is designed to run until stopped
 with control-c.
+
+Unsupported WAV files will result in undefined behavior.
+Only uncompressed 16-bit stereo WAV files are supported.
 
 ## WAV Exclusion
 
