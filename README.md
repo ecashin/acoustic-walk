@@ -4,7 +4,7 @@
 
 This is hastily made software
 targeted toward an art opening in Athens, Georgia,
-under carefully controlled circumstances.
+and to be used under carefully controlled circumstances.
 
 ## Usage
 
