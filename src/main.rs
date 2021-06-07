@@ -1,11 +1,12 @@
-use clap::App;
 use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
 use samplerate::{convert, ConverterType};
-use std::io::prelude::*;
-use std::{fs, io, path, thread};
+use std::{path, thread};
 use walkdir::WalkDir;
+
+mod config;
+use config::make_config;
 
 const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
 const N_PRODUCERS: u32 = 10;
@@ -322,32 +323,7 @@ fn generate_samples(samples_tx: chan::Sender<Vec<f32>>, sink_sr: usize, wavs: Ve
 }
 
 fn main() {
-    let matches = App::new("acouwalk")
-        .author("Ed.Cashin@acm.org")
-        .about("stereo granular streamer for JACK")
-        .arg(clap::Arg::from_usage(
-            "-e --exclude=[FILE] 'Read excluded WAVs from file'",
-        ))
-        .arg(
-            clap::Arg::with_name("dirs")
-                .required(true)
-                .min_values(1)
-                .help("<WAV-directory>..."),
-        )
-        .get_matches();
-
-    let mut excluded_wavs: Vec<std::path::PathBuf> = Vec::new();
-    if let Some(e) = matches.value_of("exclude") {
-        println!("e:{}", e);
-        let f = fs::File::open(e).ok().unwrap();
-        let reader = io::BufReader::new(f);
-        for line in reader.lines() {
-            let line = line.ok().unwrap();
-            println!("excluding {}", line);
-            let path = std::path::Path::new(&line);
-            excluded_wavs.push(path.to_path_buf());
-        }
-    }
+    let cfg = make_config();
 
     let (done_tx, done_rx) = chan::sync(0); // worker completion channel
     let (wdescs_tx, wdescs_rx) = chan::sync(0); // wav description channel
@@ -360,25 +336,23 @@ fn main() {
             done_tx.send(N_PRODUCERS); // consumer ID is one greater than max producer ID
         });
     }
-    if let Some(dirs) = matches.values_of("dirs") {
-        let dirs: Vec<&str> = dirs.collect();
-        {
-            // At the end of this scope, dirs_tx dropped - we're done sending directories.
-            let (dirs_tx, dirs_rx) = chan::sync(0);
-            for w in 0..N_PRODUCERS {
-                let dirs_rx = dirs_rx.clone();
-                let done_tx = done_tx.clone();
-                let wdescs_tx = wdescs_tx.clone();
-                thread::spawn(move || {
-                    survey_wavs(w, dirs_rx, wdescs_tx, done_tx);
-                });
-            }
-            for d in dirs {
-                for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
-                    if !excluded_wavs.iter().any(|i| i == entry.path()) {
-                        let p = path::PathBuf::from(entry.path());
-                        dirs_tx.send(p);
-                    }
+
+    {
+        // At the end of this scope, dirs_tx dropped - we're done sending directories.
+        let (dirs_tx, dirs_rx) = chan::sync(0);
+        for w in 0..N_PRODUCERS {
+            let dirs_rx = dirs_rx.clone();
+            let done_tx = done_tx.clone();
+            let wdescs_tx = wdescs_tx.clone();
+            thread::spawn(move || {
+                survey_wavs(w, dirs_rx, wdescs_tx, done_tx);
+            });
+        }
+        for d in cfg.dirs {
+            for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
+                if !cfg.excluded_wavs.iter().any(|i| i == entry.path()) {
+                    let p = path::PathBuf::from(entry.path());
+                    dirs_tx.send(p);
                 }
             }
         }
