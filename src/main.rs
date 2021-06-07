@@ -261,15 +261,26 @@ fn make_grains(
             let src_sr = r.spec().sample_rate;
             let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);
             for _ in 0..ttl {
+                let mut too_loud = false;
                 g.toss(wav.n_samples);
                 r.seek(g.start).ok();
                 let mut src_samples: Vec<f32> = r
                     .samples()
                     .take((g.len * 2) as usize)
-                    .map(|e: Result<i16, hound::Error>| e.ok().unwrap() as f32 / i16::MAX as f32)
+                    .map(|e: Result<i16, hound::Error>| {
+                        let s = e.ok().unwrap();
+                        if s == i16::MAX || s == i16::MIN {
+                            too_loud = true;
+                        }
+                        s as f32 / i16::MAX as f32
+                    })
                     .enumerate()
                     .map(|(i, s)| s * g.amplitude(i / 2, None))
                     .collect();
+                if too_loud {
+                    println!("muting {:?} at too-loud sample index {}", wav.path, g.start);
+                    src_samples = src_samples.iter().map(|_| 0.0).collect();
+                }
                 if src_sr == sink_sr as u32 {
                     send_buf.append(&mut src_samples);
                 } else {
