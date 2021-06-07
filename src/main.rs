@@ -2,11 +2,11 @@ use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
 use samplerate::{convert, ConverterType};
-use std::{path, thread};
+use std::{fs, io, path, thread};
 use walkdir::WalkDir;
 
 mod config;
-use config::make_config;
+use config::Config;
 
 const DEFAULT_TUKEY_WINDOW_ALPHA: f32 = 0.5;
 const N_PRODUCERS: u32 = 10;
@@ -64,15 +64,47 @@ impl Grain {
     }
 }
 
-fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
+#[derive(Clone)]
+struct WavDesc {
+    path: path::PathBuf,
+    n_samples: u32,
+    spec: hound::WavSpec,
+    ms_for_choice: f32,
+}
+
+fn capped_ms(
+    path: &str,
+    reader: hound::WavReader<io::BufReader<fs::File>>,
+    cap_ms: Option<u32>,
+) -> f32 {
+    let sr_ms = (reader.spec().sample_rate as f32) / 1000.0;
+    let n_samples = reader.duration() as f32;
+    let wav_ms = n_samples / sr_ms;
+    match cap_ms {
+        None => wav_ms,
+        Some(cap_ms) => {
+            let cap_ms = cap_ms as f32;
+            if wav_ms > cap_ms {
+                println!("capping {} -> {} for {:?}", wav_ms, cap_ms, path);
+                cap_ms
+            } else {
+                wav_ms
+            }
+        }
+    }
+}
+
+fn describe_wav(path: path::PathBuf, cap_ms: Option<u32>) -> Option<WavDesc> {
     if let Ok(reader) = hound::WavReader::open(&path) {
         if reader.spec().channels != 2 {
             None
         } else {
+            let path_str = format!("{:?}", path);
             Some(WavDesc {
                 path,
                 n_samples: reader.duration(),
                 spec: reader.spec(),
+                ms_for_choice: capped_ms(&path_str, reader, cap_ms),
             })
         }
     } else {
@@ -82,6 +114,7 @@ fn describe_wav(path: path::PathBuf) -> Option<WavDesc> {
 
 fn survey_wavs(
     worker_id: u32,
+    cfg: Config,
     paths_rx: chan::Receiver<path::PathBuf>,
     wdescs_tx: chan::Sender<Option<WavDesc>>,
     done_tx: chan::Sender<u32>,
@@ -91,7 +124,7 @@ fn survey_wavs(
             if let Some(ext) = path.extension() {
                 if let Some(ext) = ext.to_str() {
                     if ext.eq_ignore_ascii_case("wav") {
-                        if let Some(wdesc) = describe_wav(path) {
+                        if let Some(wdesc) = describe_wav(path, cfg.cap_ms) {
                             println!("worker:{} sending for {:?}", worker_id, &wdesc.path);
                             wdescs_tx.send(Some(wdesc));
                         }
@@ -102,13 +135,6 @@ fn survey_wavs(
     }
     wdescs_tx.send(None);
     done_tx.send(worker_id);
-}
-
-#[derive(Clone)]
-struct WavDesc {
-    path: path::PathBuf,
-    n_samples: u32,
-    spec: hound::WavSpec,
 }
 
 fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Receiver<Vec<f32>>) {
@@ -170,7 +196,7 @@ fn select_wavs(wavs: &Vec<WavDesc>, n: usize) -> Option<Vec<usize>> {
     if wavs.len() == 0 {
         return None;
     }
-    let lens: Vec<f64> = wavs.iter().map(|e| e.n_samples as f64).collect();
+    let lens: Vec<f64> = wavs.iter().map(|e| e.ms_for_choice as f64).collect();
     let dirichlet = Dirichlet::new(&lens).unwrap();
     let mut source = source::default();
     let probs = dirichlet.sample(&mut rand::thread_rng());
@@ -323,7 +349,7 @@ fn generate_samples(samples_tx: chan::Sender<Vec<f32>>, sink_sr: usize, wavs: Ve
 }
 
 fn main() {
-    let cfg = make_config();
+    let cfg = config::make_config();
 
     let (done_tx, done_rx) = chan::sync(0); // worker completion channel
     let (wdescs_tx, wdescs_rx) = chan::sync(0); // wav description channel
@@ -344,8 +370,9 @@ fn main() {
             let dirs_rx = dirs_rx.clone();
             let done_tx = done_tx.clone();
             let wdescs_tx = wdescs_tx.clone();
+            let cfg = cfg.clone();
             thread::spawn(move || {
-                survey_wavs(w, dirs_rx, wdescs_tx, done_tx);
+                survey_wavs(w, cfg, dirs_rx, wdescs_tx, done_tx);
             });
         }
         for d in cfg.dirs {

@@ -2,9 +2,11 @@ use clap::App;
 use std::io::prelude::*;
 use std::{fs, io};
 
+#[derive(Clone)]
 pub struct Config {
     pub excluded_wavs: Vec<std::path::PathBuf>,
     pub dirs: Vec<String>,
+    pub cap_ms: Option<u32>,
 }
 
 pub fn make_config() -> Config {
@@ -13,6 +15,9 @@ pub fn make_config() -> Config {
         .about("stereo granular streamer for JACK")
         .arg(clap::Arg::from_usage(
             "-e --exclude=[FILE] 'Read excluded WAVs from file'",
+        ))
+        .arg(clap::Arg::from_usage(
+            "-c --len-cap=[INT] 'Cap on WAV length in ms as used for selection'",
         ))
         .arg(
             clap::Arg::with_name("dirs")
@@ -40,8 +45,16 @@ pub fn make_config() -> Config {
             excluded_wavs.push(path.to_path_buf());
         }
     }
+
+    let cap_ms = if let Some(c) = matches.value_of("len-cap") {
+        Some(c.parse::<u32>().unwrap())
+    } else {
+        None
+    };
+
     Config {
-        excluded_wavs: excluded_wavs,
-        dirs: dirs,
+        excluded_wavs,
+        dirs,
+        cap_ms,
     }
 }
