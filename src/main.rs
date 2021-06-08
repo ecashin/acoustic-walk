@@ -172,7 +172,7 @@ fn main() {
         }
         for d in cfg.dirs {
             for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
-                if !cfg.excluded_wavs.iter().any(|i| i == entry.path()) {
+                if !cfg.excluded_wavs.contains(entry.path()) {
                     let p = path::PathBuf::from(entry.path());
                     dirs_tx.send(p);
                 }

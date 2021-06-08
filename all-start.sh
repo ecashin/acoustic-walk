@@ -6,7 +6,10 @@ cd "$d"
 sh jack-start.sh
 sleep 2
 
-cargo run -- -c 70000 ~/samples-ecashin-orig/Zoom-H5 > acourun.log 2>&1 &
+cargo run -- \
+    --exclude excluded.txt \
+    -c 70000 \
+    ~/samples-ecashin-orig/Zoom-H5 > acourun.log 2>&1 &
 echo $! > acourun.pid
 sleep 2
 

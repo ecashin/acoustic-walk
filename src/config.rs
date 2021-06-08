@@ -1,10 +1,11 @@
 use clap::App;
+use std::collections::HashSet;
 use std::io::prelude::*;
 use std::{fs, io};
 
 #[derive(Clone)]
 pub struct Config {
-    pub excluded_wavs: Vec<std::path::PathBuf>,
+    pub excluded_wavs: HashSet<std::path::PathBuf>,
     pub dirs: Vec<String>,
     pub cap_ms: Option<u32>,
 }
@@ -33,7 +34,7 @@ pub fn make_config() -> Config {
         Vec::new()
     };
 
-    let mut excluded_wavs: Vec<std::path::PathBuf> = Vec::new();
+    let mut excluded_wavs: HashSet<std::path::PathBuf> = HashSet::new();
     if let Some(e) = matches.value_of("exclude") {
         println!("e:{}", e);
         let f = fs::File::open(e).ok().unwrap();
@@ -42,7 +43,7 @@ pub fn make_config() -> Config {
             let line = line.ok().unwrap();
             println!("excluding {}", line);
             let path = std::path::Path::new(&line);
-            excluded_wavs.push(path.to_path_buf());
+            excluded_wavs.insert(path.to_path_buf());
         }
     }
 
