@@ -61,26 +61,17 @@ impl Grain {
 
 pub fn make_grains(
     grain_maker_id: u32,
-    wavs: &Vec<WavDesc>,
+    wavpick_rx: chan::Receiver<WavDesc>,
     grains_tx: chan::Sender<Vec<f32>>,
     sink_sr: usize,
 ) {
     let mut g = Grain::new(sink_sr as u32);
-    let wavs = wavs.clone();
     thread::spawn(move || {
         println!("grain maker {} starting", grain_maker_id);
         let mut rng = rand::thread_rng();
         let mut send_buf: Vec<f32> = Vec::new();
         loop {
-            let which = crate::wav::select_wavs(&wavs, 1)
-                .unwrap()
-                .iter()
-                .take(1)
-                .map(|e| *e)
-                .last()
-                .unwrap();
-            let wav = &wavs[which];
-            println!("grain maker {} chose WAV {:?}", grain_maker_id, wav.path);
+            let wav = wavpick_rx.recv().unwrap();
             let mut r = hound::WavReader::open(wav.path.clone()).ok().unwrap();
             let src_sr = r.spec().sample_rate;
             let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);

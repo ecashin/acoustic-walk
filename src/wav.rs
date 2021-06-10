@@ -2,7 +2,7 @@ use crate::config::Config;
 use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
-use std::{fs, io, path};
+use std::{fs, io, path, thread};
 
 #[derive(Clone)]
 pub struct WavDesc {
@@ -10,6 +10,41 @@ pub struct WavDesc {
     pub n_samples: u32,
     pub spec: hound::WavSpec,
     pub ms_for_choice: f32,
+}
+
+pub fn start_wav_picker(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) -> chan::Receiver<WavDesc> {
+    let mut n = n_producers;
+    let mut wavs: Vec<WavDesc> = Vec::new();
+    while n > 0 {
+        let wdesc_opt = wdescs_rx.recv().expect("producers don't close work chan");
+        if let Some(wdesc) = wdesc_opt {
+            println!(
+                "consumer received {:?}:{:?}:{:?} with {} producers remaining",
+                wdesc.path, wdesc.spec, wdesc.n_samples, n
+            );
+            wavs.push(wdesc);
+        } else {
+            println!("consumer received None");
+            n -= 1;
+        }
+    }
+    println!("WAV picker collected {} wav descriptions - spawning thread", wavs.len());
+    let (wavpick_tx, wavpick_rx) = chan::sync(0);
+    thread::spawn(move || {
+        loop {
+            let which = crate::wav::select_wavs(&wavs, 1)
+                .unwrap()
+                .iter()
+                .take(1)
+                .map(|e| *e)
+                .last()
+                .unwrap();
+            let wav = &wavs[which];
+            println!("wav picker: {:?}", wav.path);
+            wavpick_tx.send(wav.clone());
+        }
+    });
+    wavpick_rx
 }
 
 pub fn describe_wav(path: path::PathBuf, cap_ms: Option<u32>) -> Option<WavDesc> {

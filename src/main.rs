@@ -67,22 +67,7 @@ fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Recei
 }
 
 fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
-    let mut n = n_producers;
-    let mut wavs: Vec<WavDesc> = Vec::new();
-    while n > 0 {
-        let wdesc_opt = wdescs_rx.recv().expect("producers don't close work chan");
-        if let Some(wdesc) = wdesc_opt {
-            println!(
-                "consumer received {:?}:{:?}:{:?} with {} producers remaining",
-                wdesc.path, wdesc.spec, wdesc.n_samples, n
-            );
-            wavs.push(wdesc);
-        } else {
-            println!("consumer received None");
-            n -= 1;
-        }
-    }
-    println!("collected {} wav descriptions", wavs.len());
+    let wavpick_rx = wav::start_wav_picker(n_producers, wdescs_rx);
 
     let (client, status) =
         jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
@@ -90,7 +75,7 @@ fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
 
     let (samples_tx, samples_rx) = chan::sync(2);
     let (playdone_tx, playdone_rx) = chan::sync(0);
-    generate_samples(samples_tx, client.sample_rate(), wavs);
+    generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
     play(client, playdone_tx, samples_rx);
     playdone_rx.recv();
     println!("use_wavs received playdone message");
@@ -108,11 +93,12 @@ fn mix(bufs: Vec<Vec<f32>>) -> Vec<f32> {
     mixbuf
 }
 
-fn generate_samples(samples_tx: chan::Sender<Vec<f32>>, sink_sr: usize, wavs: Vec<WavDesc>) -> u32 {
+fn generate_samples(samples_tx: chan::Sender<Vec<f32>>, sink_sr: usize, wavpick_rx: chan::Receiver<WavDesc>) -> u32 {
     let mut grains_rxs: Vec<chan::Receiver<Vec<f32>>> = Vec::new();
     for i in 0..N_GRAINS {
         let (grains_tx, grains_rx) = chan::sync(0);
-        grain::make_grains(i, &wavs, grains_tx, sink_sr);
+        let wavpick_rx = wavpick_rx.clone();
+        grain::make_grains(i, wavpick_rx, grains_tx, sink_sr);
         grains_rxs.push(grains_rx);
     }
     let mut n_grain_makers = N_GRAINS;
