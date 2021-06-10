@@ -116,7 +116,9 @@ pub fn make_grains(
                         .map(|e| *e)
                         .collect();
                     let new_len = send_buf.len() - GRAIN_BUF_N_SAMPLES;
-                    for (i, j) in (0..new_len).enumerate() {
+                    let src_start = GRAIN_BUF_N_SAMPLES;
+                    let src_end = src_start + new_len;
+                    for (i, j) in (src_start..src_end).enumerate() {
                         send_buf[i] = send_buf[j];
                     }
                     send_buf.truncate(new_len);

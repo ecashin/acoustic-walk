@@ -12,7 +12,10 @@ pub struct WavDesc {
     pub ms_for_choice: f32,
 }
 
-pub fn start_wav_picker(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) -> chan::Receiver<WavDesc> {
+pub fn start_wav_picker(
+    n_producers: u32,
+    wdescs_rx: chan::Receiver<Option<WavDesc>>,
+) -> chan::Receiver<WavDesc> {
     let mut n = n_producers;
     let mut wavs: Vec<WavDesc> = Vec::new();
     while n > 0 {
@@ -28,21 +31,22 @@ pub fn start_wav_picker(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDe
             n -= 1;
         }
     }
-    println!("WAV picker collected {} wav descriptions - spawning thread", wavs.len());
+    println!(
+        "WAV picker collected {} wav descriptions - spawning thread",
+        wavs.len()
+    );
     let (wavpick_tx, wavpick_rx) = chan::sync(0);
-    thread::spawn(move || {
-        loop {
-            let which = crate::wav::select_wavs(&wavs, 1)
-                .unwrap()
-                .iter()
-                .take(1)
-                .map(|e| *e)
-                .last()
-                .unwrap();
-            let wav = &wavs[which];
-            println!("wav picker: {:?}", wav.path);
-            wavpick_tx.send(wav.clone());
-        }
+    thread::spawn(move || loop {
+        let which = crate::wav::select_wavs(&wavs, 1)
+            .unwrap()
+            .iter()
+            .take(1)
+            .map(|e| *e)
+            .last()
+            .unwrap();
+        let wav = &wavs[which];
+        println!("wav picker: {:?}", wav.path);
+        wavpick_tx.send(wav.clone());
     });
     wavpick_rx
 }

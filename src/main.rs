@@ -93,7 +93,11 @@ fn mix(bufs: Vec<Vec<f32>>) -> Vec<f32> {
     mixbuf
 }
 
-fn generate_samples(samples_tx: chan::Sender<Vec<f32>>, sink_sr: usize, wavpick_rx: chan::Receiver<WavDesc>) -> u32 {
+fn generate_samples(
+    samples_tx: chan::Sender<Vec<f32>>,
+    sink_sr: usize,
+    wavpick_rx: chan::Receiver<WavDesc>,
+) -> u32 {
     let mut grains_rxs: Vec<chan::Receiver<Vec<f32>>> = Vec::new();
     for i in 0..N_GRAINS {
         let (grains_tx, grains_rx) = chan::sync(0);
