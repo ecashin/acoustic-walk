@@ -6,11 +6,26 @@ cd "$d"
 sh jack-start.sh
 sleep 2
 
-cargo run -- \
+cargo build
+rm -f acourun.pipe
+mkfifo acourun.pipe
+
+target/debug/acoustic-walk \
+    play \
     --exclude excluded.txt \
     -c 70000 \
-    ~/samples-ecashin-orig/Zoom-H5 > acourun.log 2>&1 &
-echo $! > acourun.pid
+    ~/samples-ecashin-orig/Zoom-H5 > acourun.pipe 2>&1 &
+echo $! > acouplay.pid
+
+sleep 1
+
+target/debug/acoustic-walk \
+    ringbuf \
+    --trigger-file acourun.show \
+    --n-entries 1024 \
+    < acourun.pipe &
+echo $! > acoubuf.pid
+
 sleep 2
 
 # Use `jack_lsp -c` to find out names.

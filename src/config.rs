@@ -42,9 +42,15 @@ pub fn make_config() -> Config {
                         .help("<WAV-directory>..."),
                 ),
         )
-        .subcommand(SubCommand::with_name("ringbuf").arg(Arg::from_usage(
-            "-t --trigger-file=[FILE] 'Trigger file for output'",
-        )))
+        .subcommand(
+            SubCommand::with_name("ringbuf")
+                .arg(Arg::from_usage(
+                    "-t --trigger-file=[FILE] 'Trigger file for output'",
+                ))
+                .arg(Arg::from_usage(
+                    "-n --n-entries=[INT] 'Number of lines in buffer'",
+                )),
+        )
         .get_matches();
 
     match matches.subcommand() {
