@@ -1,3 +1,4 @@
+use crossbeam_channel::{bounded, Receiver, RecvError, Sender};
 use std::{path, thread};
 use walkdir::WalkDir;
 
@@ -12,11 +13,7 @@ mod wav;
 
 const N_PRODUCERS: u32 = 10;
 
-fn play_to_jack(
-    client: jack::Client,
-    done_tx: chan::Sender<()>,
-    samples_rx: chan::Receiver<Vec<f32>>,
-) {
+fn play_to_jack(client: jack::Client, done_tx: Sender<()>, samples_rx: Receiver<Vec<f32>>) {
     println!("play starting");
     let mut out_left = client
         .register_port("acouwalk_out_L", jack::AudioOut::default())
@@ -25,7 +22,7 @@ fn play_to_jack(
         .register_port("acouwalk_out_R", jack::AudioOut::default())
         .unwrap();
     let mut samples: Vec<f32> = Vec::new();
-    let (jackdone_tx, jackdone_rx) = chan::sync(0);
+    let (jackdone_tx, jackdone_rx) = bounded(0);
     let jack_sr = client.sample_rate();
     let mut consumed = 0;
     let process = jack::ClosureProcessHandler::new(
@@ -40,13 +37,13 @@ fn play_to_jack(
             if samples.len() - consumed < n * 2 {
                 // (2 for stereo)
                 match samples_rx.recv() {
-                    Some(mut new_samples) => {
+                    Ok(mut new_samples) => {
                         println!("play received {} stereo samples", new_samples.len() / 2);
                         samples.append(&mut new_samples)
                     }
-                    None => {
+                    Err(RecvError) => {
                         println!("play received EOF from samples channel");
-                        jackdone_tx.send(());
+                        jackdone_tx.send(()).unwrap();
                         return jack::Control::Quit;
                     }
                 }
@@ -68,21 +65,21 @@ fn play_to_jack(
     println!("play received playdone message from JACK handler");
     active_client.deactivate().unwrap();
     println!("play is done");
-    done_tx.send(());
+    done_tx.send(()).unwrap();
 }
 
-fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
+fn use_wavs(n_producers: u32, wdescs_rx: Receiver<Option<WavDesc>>) {
     let wavpick_rx = wav::start_wav_picker(n_producers, wdescs_rx);
 
     let (client, status) =
         jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
     println!("new client:{:?} status:{:?}", client, status);
 
-    let (samples_tx, samples_rx) = chan::sync(2);
-    let (playdone_tx, playdone_rx) = chan::sync(0);
+    let (samples_tx, samples_rx) = bounded(2);
+    let (playdone_tx, playdone_rx) = bounded(0);
     generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
     play_to_jack(client, playdone_tx, samples_rx);
-    playdone_rx.recv();
+    playdone_rx.recv().unwrap();
     println!("use_wavs received playdone message");
 }
 
@@ -99,13 +96,13 @@ fn mix(bufs: Vec<Vec<f32>>) -> Vec<f32> {
 }
 
 fn generate_samples(
-    samples_tx: chan::Sender<Vec<f32>>,
+    samples_tx: Sender<Vec<f32>>,
     sink_sr: usize,
-    wavpick_rx: chan::Receiver<WavDesc>,
+    wavpick_rx: Receiver<WavDesc>,
 ) -> u32 {
-    let mut grains_rxs: Vec<chan::Receiver<Vec<f32>>> = Vec::new();
+    let mut grains_rxs: Vec<Receiver<Vec<f32>>> = Vec::new();
     for i in 0..N_GRAINS {
-        let (grains_tx, grains_rx) = chan::sync(0);
+        let (grains_tx, grains_rx) = bounded(0);
         let wavpick_rx = wavpick_rx.clone();
         grain::make_grains(i, wavpick_rx, grains_tx, sink_sr);
         grains_rxs.push(grains_rx);
@@ -118,8 +115,14 @@ fn generate_samples(
             let mut bufs: Vec<Vec<f32>> = Vec::new();
             for i in 0..N_GRAINS {
                 match grains_rxs[i as usize].recv() {
-                    None => n_grain_makers -= 1,
-                    Some(buf) => bufs.push(buf),
+                    Ok(buf) => bufs.push(buf),
+                    Err(RecvError) => {
+                        n_grain_makers -= 1;
+                        println!(
+                            "Grain buffer receiver got RecvError -> {} grain makers remaining",
+                            n_grain_makers
+                        );
+                    }
                 }
             }
             if bufs.len() > 0 {
@@ -128,7 +131,7 @@ fn generate_samples(
                     "generate_samples sending {} mixed stereo samples",
                     mixed.len() / 2
                 );
-                samples_tx.send(mixed);
+                samples_tx.send(mixed).unwrap();
             } else {
                 println!("generate_samples without anything to send");
             }
@@ -153,21 +156,21 @@ fn main() {
 
 // fn play(excluded_wavs: HashSet<path::PathBuf>, dirs: Vec<String>, cap_ms: Option<u32>) {
 fn play(cfg: config::PlayConfig) {
-    let (done_tx, done_rx) = chan::sync(0); // worker completion channel
-    let (wdescs_tx, wdescs_rx) = chan::sync(0); // wav description channel
+    let (done_tx, done_rx) = bounded(0); // worker completion channel
+    let (wdescs_tx, wdescs_rx) = bounded(0); // wav description channel
     {
         // Work consumer thread takes ownership of wdescs_rx.
         let wdescs_rx = wdescs_rx;
         let done_tx = done_tx.clone();
         thread::spawn(move || {
             use_wavs(N_PRODUCERS, wdescs_rx);
-            done_tx.send(N_PRODUCERS); // consumer ID is one greater than max producer ID
+            done_tx.send(N_PRODUCERS).unwrap(); // consumer ID is one greater than max producer ID
         });
     }
 
     {
         // At the end of this scope, dirs_tx dropped - we're done sending directories.
-        let (dirs_tx, dirs_rx) = chan::sync(0);
+        let (dirs_tx, dirs_rx) = bounded(0);
         for w in 0..N_PRODUCERS {
             let dirs_rx = dirs_rx.clone();
             let done_tx = done_tx.clone();
@@ -181,16 +184,21 @@ fn play(cfg: config::PlayConfig) {
             for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {
                 if !cfg.excluded_wavs.contains(entry.path()) {
                     let p = path::PathBuf::from(entry.path());
-                    dirs_tx.send(p);
+                    dirs_tx.send(p).unwrap();
                 }
             }
         }
     }
     let mut n_workers = N_PRODUCERS + 1;
     while n_workers > 0 {
-        if let Some(worker_id) = done_rx.recv() {
-            println!("worker {} finished", worker_id);
-            n_workers -= 1;
+        match done_rx.recv() {
+            Ok(worker_id) => {
+                println!("worker {} finished", worker_id);
+                n_workers -= 1;
+            }
+            Err(RecvError) => {
+                println!("work generator done channel was closed");
+            }
         }
     }
 }

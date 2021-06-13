@@ -1,4 +1,5 @@
 use crate::config::PlayConfig;
+use crossbeam_channel::{bounded, Receiver, Sender};
 use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
@@ -14,8 +15,8 @@ pub struct WavDesc {
 
 pub fn start_wav_picker(
     n_producers: u32,
-    wdescs_rx: chan::Receiver<Option<WavDesc>>,
-) -> chan::Receiver<WavDesc> {
+    wdescs_rx: Receiver<Option<WavDesc>>,
+) -> Receiver<WavDesc> {
     let mut n = n_producers;
     let mut wavs: Vec<WavDesc> = Vec::new();
     while n > 0 {
@@ -35,7 +36,7 @@ pub fn start_wav_picker(
         "WAV picker collected {} wav descriptions - spawning thread",
         wavs.len()
     );
-    let (wavpick_tx, wavpick_rx) = chan::sync(0);
+    let (wavpick_tx, wavpick_rx) = bounded(0);
     thread::spawn(move || loop {
         let which = crate::wav::select_wavs(&wavs, 1)
             .unwrap()
@@ -46,7 +47,7 @@ pub fn start_wav_picker(
             .unwrap();
         let wav = &wavs[which];
         println!("wav picker: {:?}", wav.path);
-        wavpick_tx.send(wav.clone());
+        wavpick_tx.send(wav.clone()).unwrap();
     });
     wavpick_rx
 }
@@ -107,9 +108,9 @@ pub fn select_wavs(wavs: &Vec<WavDesc>, n: usize) -> Option<Vec<usize>> {
 pub fn survey_wavs(
     worker_id: u32,
     cfg: PlayConfig,
-    paths_rx: chan::Receiver<path::PathBuf>,
-    wdescs_tx: chan::Sender<Option<WavDesc>>,
-    done_tx: chan::Sender<u32>,
+    paths_rx: Receiver<path::PathBuf>,
+    wdescs_tx: Sender<Option<WavDesc>>,
+    done_tx: Sender<u32>,
 ) {
     for path in paths_rx {
         if path.is_file() {
@@ -118,13 +119,13 @@ pub fn survey_wavs(
                     if ext.eq_ignore_ascii_case("wav") {
                         if let Some(wdesc) = describe_wav(path, cfg.cap_ms) {
                             println!("worker:{} sending for {:?}", worker_id, &wdesc.path);
-                            wdescs_tx.send(Some(wdesc));
+                            wdescs_tx.send(Some(wdesc)).unwrap();
                         }
                     }
                 }
             }
         }
     }
-    wdescs_tx.send(None);
-    done_tx.send(worker_id);
+    wdescs_tx.send(None).unwrap();
+    done_tx.send(worker_id).unwrap();
 }

@@ -1,3 +1,4 @@
+use crossbeam_channel::{Receiver, Sender};
 use rand_distr::Distribution;
 use samplerate::{convert, ConverterType};
 use std::thread;
@@ -61,8 +62,8 @@ impl Grain {
 
 pub fn make_grains(
     grain_maker_id: u32,
-    wavpick_rx: chan::Receiver<WavDesc>,
-    grains_tx: chan::Sender<Vec<f32>>,
+    wavpick_rx: Receiver<WavDesc>,
+    grains_tx: Sender<Vec<f32>>,
     sink_sr: usize,
 ) {
     let mut g = Grain::new(sink_sr as u32);
@@ -122,7 +123,7 @@ pub fn make_grains(
                         send_buf[i] = send_buf[j];
                     }
                     send_buf.truncate(new_len);
-                    grains_tx.send(send_part);
+                    grains_tx.send(send_part).unwrap();
                 }
             }
         }
