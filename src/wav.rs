@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::PlayConfig;
 use probability::prelude::*;
 use rand_distr::Dirichlet;
 use rand_distr::Distribution;
@@ -106,7 +106,7 @@ pub fn select_wavs(wavs: &Vec<WavDesc>, n: usize) -> Option<Vec<usize>> {
 
 pub fn survey_wavs(
     worker_id: u32,
-    cfg: Config,
+    cfg: PlayConfig,
     paths_rx: chan::Receiver<path::PathBuf>,
     wdescs_tx: chan::Sender<Option<WavDesc>>,
     done_tx: chan::Sender<u32>,

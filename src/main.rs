@@ -1,17 +1,22 @@
 use std::{path, thread};
 use walkdir::WalkDir;
 
+use config::Config;
 use grain::N_GRAINS;
 use wav::WavDesc;
 
 mod config;
-
 mod grain;
+mod ringbuf;
 mod wav;
 
 const N_PRODUCERS: u32 = 10;
 
-fn play(client: jack::Client, done_tx: chan::Sender<()>, samples_rx: chan::Receiver<Vec<f32>>) {
+fn play_to_jack(
+    client: jack::Client,
+    done_tx: chan::Sender<()>,
+    samples_rx: chan::Receiver<Vec<f32>>,
+) {
     println!("play starting");
     let mut out_left = client
         .register_port("acouwalk_out_L", jack::AudioOut::default())
@@ -76,7 +81,7 @@ fn use_wavs(n_producers: u32, wdescs_rx: chan::Receiver<Option<WavDesc>>) {
     let (samples_tx, samples_rx) = chan::sync(2);
     let (playdone_tx, playdone_rx) = chan::sync(0);
     generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
-    play(client, playdone_tx, samples_rx);
+    play_to_jack(client, playdone_tx, samples_rx);
     playdone_rx.recv();
     println!("use_wavs received playdone message");
 }
@@ -136,6 +141,18 @@ fn generate_samples(
 fn main() {
     let cfg = config::make_config();
 
+    match cfg {
+        Config::Buf(cfg) => {
+            ringbuf::start(cfg.trigfile, cfg.n_entries);
+        }
+        Config::Play(cfg) => {
+            play(cfg);
+        }
+    }
+}
+
+// fn play(excluded_wavs: HashSet<path::PathBuf>, dirs: Vec<String>, cap_ms: Option<u32>) {
+fn play(cfg: config::PlayConfig) {
     let (done_tx, done_rx) = chan::sync(0); // worker completion channel
     let (wdescs_tx, wdescs_rx) = chan::sync(0); // wav description channel
     {
