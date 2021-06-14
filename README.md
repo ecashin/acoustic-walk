@@ -56,3 +56,21 @@ and lacks fully fledged shut-down mechanics by design.
 
 It can be manually stopped by control-c
 or by `kill`.
+
+## Example Scripts
+
+Scripts that work for me could serve as useful examples
+for you to build upon.
+
+    sh all-start.sh
+
+On my system, the above script (stops and) starts JACK
+(via `jack-start.sh`),
+settings it to use the same sample rate as my field recordings.
+Then it runs acoustic-walk in both "play" and "ring buffer" modes.
+To see output from the player, I trigger the ringbuf's output
+by creating a file named `acourun.show`.
+
+I can kill the acoustic-walk processes as shown below.
+
+    for i in *.pid; do kill `cat "$i"`; done
