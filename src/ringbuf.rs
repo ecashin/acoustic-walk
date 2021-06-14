@@ -1,4 +1,5 @@
 use crossbeam_channel::{bounded, select, Sender};
+use std::fmt::{self, Display};
 use std::time::{Duration, SystemTime};
 use std::{io, path, thread};
 
@@ -8,6 +9,12 @@ pub const DEFAULT_N_ENTRIES: usize = 1024;
 struct Entry {
     buf: String,
     rel_time: Duration,
+}
+
+impl Display for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.2}s: {}", self.rel_time.as_secs_f32(), self.buf)
+    }
 }
 
 fn empty_n(n: usize) -> Vec<Entry> {
@@ -78,7 +85,7 @@ pub fn start(trigfile: path::PathBuf, n_entries: usize) {
                         pos = (pos + 1) % n_entries;
                         ring[pos] = entry;
                         if !quiet {
-                            print!("{:?}: {}", &ring[pos].rel_time, &ring[pos].buf);
+                            print!("{}", &ring[pos]);
                         }
                     },
                     Err(e) => panic!("ringbuf received error from line getter: {}", e),
@@ -92,7 +99,7 @@ pub fn start(trigfile: path::PathBuf, n_entries: usize) {
                             let oldest_pos = pos + 1;
                             for i in oldest_pos..n_entries + oldest_pos {
                                 let i = i % n_entries;
-                                print!("{:?}: {}", &ring[i].rel_time, &ring[i].buf);
+                                print!("{}", &ring[i]);
                             }
                         }
                     },
