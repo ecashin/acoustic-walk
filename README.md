@@ -48,3 +48,11 @@ and opening the resulting SVG file in a web browser.
 
     cargo install flamegraph
     flamegraph target/debug/acoustic-walk ~/samples-ecashin-orig/Zoom-H5
+
+## Music Non-stop
+
+This application is designed to run indefinitely
+and lacks fully fledged shut-down mechanics by design.
+
+It can be manually stopped by control-c
+or by `kill`.

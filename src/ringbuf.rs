@@ -1,6 +1,6 @@
-use std::io;
-use std::path;
+use crossbeam_channel::{bounded, select, Sender};
 use std::time::{Duration, SystemTime};
+use std::{io, path, thread};
 
 pub const DEFAULT_N_ENTRIES: usize = 1024;
 
@@ -21,31 +21,84 @@ fn empty_n(n: usize) -> Vec<Entry> {
     v
 }
 
-pub fn start(trigfile: path::PathBuf, n_entries: usize) {
+fn start_trig_watcher(trigfile: path::PathBuf, trig_tx: Sender<bool>) {
+    thread::spawn(move || {
+        let mut last_state = trigfile.exists();
+        trig_tx.send(last_state).unwrap();
+        loop {
+            thread::sleep(Duration::from_secs(1));
+            let state = trigfile.exists();
+            if state != last_state {
+                trig_tx.send(state).unwrap();
+                last_state = state;
+            }
+        }
+    });
+}
+
+fn start_line_getter(line_tx: Sender<Entry>) {
+    let start = SystemTime::now();
     let stdin = io::stdin();
+    let mut buf = String::new();
+    thread::spawn(move || loop {
+        buf.truncate(0);
+        match stdin.read_line(&mut buf).ok() {
+            Some(n) => {
+                if n == 0 {
+                    println!("line getter got zero read from stdin");
+                }
+            }
+            None => println!("line getter got None from stdin"),
+        }
+        let rel_time = SystemTime::now()
+            .duration_since(start)
+            .expect("getting time in line getter");
+        line_tx
+            .send(Entry {
+                buf: buf.clone(),
+                rel_time: rel_time,
+            })
+            .unwrap();
+    });
+}
+
+pub fn start(trigfile: path::PathBuf, n_entries: usize) {
     let mut ring: Vec<Entry> = empty_n(n_entries);
     let mut pos = 0;
     let mut quiet = true;
-    let start = SystemTime::now();
+    let (trig_tx, trig_rx) = bounded(0);
+    start_trig_watcher(trigfile, trig_tx);
+    let (line_tx, line_rx) = bounded(0);
+    start_line_getter(line_tx);
     loop {
-        ring[pos].buf.truncate(0);
-        ring[pos].rel_time = SystemTime::now()
-            .duration_since(start)
-            .expect("calculating duration");
-        stdin.read_line(&mut ring[pos].buf).ok();
-        if quiet && trigfile.exists() {
-            quiet = false;
-            for i in pos + 1..n_entries + pos {
-                let i = i % n_entries;
-                print!("{:?}: {}", &ring[i].rel_time, &ring[i].buf);
-            }
+        select! {
+            recv(line_rx) -> entry_msg => {
+                match entry_msg {
+                    Ok(entry) => {
+                        pos = (pos + 1) % n_entries;
+                        ring[pos] = entry;
+                        if !quiet {
+                            print!("{:?}: {}", &ring[pos].rel_time, &ring[pos].buf);
+                        }
+                    },
+                    Err(e) => panic!("ringbuf received error from line getter: {}", e),
+                };
+            },
+            recv(trig_rx) -> trig_msg => {
+                match trig_msg {
+                    Ok(trig) => {
+                        quiet = !trig;
+                        if !quiet {
+                            let oldest_pos = pos + 1;
+                            for i in oldest_pos..n_entries + oldest_pos {
+                                let i = i % n_entries;
+                                print!("{:?}: {}", &ring[i].rel_time, &ring[i].buf);
+                            }
+                        }
+                    },
+                    Err(e) => panic!("ringbuf received error from trig watcher: {}", e),
+                }
+            },
         }
-        if !quiet {
-            print!("{:?}: {}", &ring[pos].rel_time, &ring[pos].buf);
-            if !trigfile.exists() {
-                quiet = true;
-            }
-        }
-        pos = (pos + 1) % n_entries;
     }
 }
