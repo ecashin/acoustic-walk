@@ -21,12 +21,14 @@ pub struct RingbufConfig {
 pub enum Config {
     Play(PlayConfig),
     Buf(RingbufConfig),
+    Cpal,
 }
 
 pub fn make_config() -> Config {
     let matches = App::new("acouwalk")
         .author("Ed.Cashin@acm.org")
-        .about("stereo granular streamer for JACK")
+        .about("stereo granular audio streamer")
+        .subcommand(SubCommand::with_name("cpal"))
         .subcommand(
             SubCommand::with_name("play")
                 .arg(Arg::from_usage(
@@ -54,6 +56,7 @@ pub fn make_config() -> Config {
         .get_matches();
 
     match matches.subcommand() {
+        ("cpal", Some(_)) => Config::Cpal,
         ("ringbuf", Some(matches)) => {
             let trigfile = if let Some(trigfile) = matches.value_of("trigger-file") {
                 path::PathBuf::from_str(trigfile).expect("path for trigger file")
@@ -69,7 +72,7 @@ pub fn make_config() -> Config {
                 trigfile,
                 n_entries,
             })
-        }
+        },
         ("play", Some(matches)) => {
             let dirs = if let Some(dirs) = matches.values_of("dirs") {
                 dirs.map(|e| String::from(e)).collect()
@@ -100,7 +103,7 @@ pub fn make_config() -> Config {
                 dirs,
                 cap_ms,
             })
-        }
+        },
         _ => panic!("unrecognized subcommand"),
     }
 }

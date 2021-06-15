@@ -7,6 +7,7 @@ use grain::N_GRAINS;
 use wav::WavDesc;
 
 mod config;
+mod cpal;
 mod grain;
 mod ringbuf;
 mod wav;
@@ -147,7 +148,8 @@ fn main() {
     match cfg {
         Config::Buf(cfg) => {
             ringbuf::start(cfg.trigfile, cfg.n_entries);
-        }
+        },
+        Config::Cpal => cpal::cpal_demo(),
         Config::Play(cfg) => {
             play(cfg);
         }
