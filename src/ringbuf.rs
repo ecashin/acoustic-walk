@@ -52,7 +52,8 @@ fn start_line_getter(line_tx: Sender<Entry>) {
         match stdin.read_line(&mut buf).ok() {
             Some(n) => {
                 if n == 0 {
-                    println!("line getter got zero read from stdin");
+                    eprintln!("line getter got zero read from stdin and exits now");
+                    return;
                 }
             }
             None => println!("line getter got None from stdin"),
@@ -89,7 +90,10 @@ pub fn start(trigfile: path::PathBuf, n_entries: usize) {
                             print!("{}", &ring[pos]);
                         }
                     },
-                    Err(e) => panic!("ringbuf received error from line getter: {}", e),
+                    Err(e) => {
+                        eprintln!("ringbuf received error from line getter: {}", e);
+                        break
+                    },
                 };
             },
             recv(trig_rx) -> trig_msg => {
