@@ -68,7 +68,7 @@ and opening the resulting SVG file in a web browser.
 Scripts that work for me could serve as useful examples
 for you to build upon.
 
-    sh all-start.sh
+    sh acouwalk.sh
 
 The above command runs acoustic-walk in both "play" and "ring buffer" modes.
 It creates some files in the current working directory.
