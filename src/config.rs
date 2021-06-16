@@ -38,10 +38,11 @@ pub fn make_config() -> Config {
                 .arg(Arg::from_usage(
                     "-e --exclude=[FILE] 'Read excluded WAVs from file'",
                 ))
-                .arg(Arg::with_name("jack")
-                    .long("--use-jack")
-                    .short("-j")
-                    .takes_value(false)
+                .arg(
+                    Arg::with_name("jack")
+                        .long("--use-jack")
+                        .short("-j")
+                        .takes_value(false),
                 )
                 .arg(
                     Arg::with_name("dirs")
@@ -78,7 +79,7 @@ pub fn make_config() -> Config {
                 trigfile,
                 n_entries,
             })
-        },
+        }
         ("play", Some(matches)) => {
             let dirs = if let Some(dirs) = matches.values_of("dirs") {
                 dirs.map(|e| String::from(e)).collect()
@@ -115,7 +116,7 @@ pub fn make_config() -> Config {
                 cap_ms,
                 use_jack,
             })
-        },
+        }
         _ => panic!("unrecognized subcommand"),
     }
 }

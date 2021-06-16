@@ -3,8 +3,8 @@ use rand_distr::Distribution;
 use std::thread;
 use std::time::Duration;
 
-use cpal::{Device, Sample, SampleFormat, SampleRate, StreamConfig};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{Device, Sample, SampleFormat, SampleRate, StreamConfig};
 use crossbeam_channel::{bounded, Receiver, RecvError, Sender};
 
 pub const SAMPLE_RATE: usize = 44100;
@@ -47,7 +47,8 @@ pub fn play_to_cpal(done_tx: Sender<()>, samples_rx: Receiver<Vec<f32>>) {
         SampleFormat::F32 => device.build_output_stream(&config, callback, err_fn),
         SampleFormat::I16 => device.build_output_stream(&config, write_silence::<i16>, err_fn),
         SampleFormat::U16 => device.build_output_stream(&config, write_silence::<u16>, err_fn),
-    }.unwrap();
+    }
+    .unwrap();
     stream.play().unwrap();
 
     cb_done_rx.recv();
@@ -69,8 +70,11 @@ enum Callback {
 
 fn prep_for_stream() -> (Device, StreamConfig, SampleFormat) {
     let host = cpal::default_host();
-    let device = host.default_output_device().expect("no output device available");
-    let supported_configs_range = device.supported_output_configs()
+    let device = host
+        .default_output_device()
+        .expect("no output device available");
+    let supported_configs_range = device
+        .supported_output_configs()
         .expect("error while querying configs");
     let supported_config = supported_configs_range
         .filter(|c| c.channels() == 2 && c.sample_format() == SampleFormat::F32)
@@ -97,14 +101,19 @@ pub fn cpal_demo() {
         SampleFormat::F32 => device.build_output_stream(&config, write_noise, err_fn),
         SampleFormat::I16 => device.build_output_stream(&config, write_silence::<i16>, err_fn),
         SampleFormat::U16 => device.build_output_stream(&config, write_silence::<u16>, err_fn),
-    }.unwrap();
+    }
+    .unwrap();
     stream.play().unwrap();
 
     thread::sleep(Duration::from_secs(5));
 }
 
 fn write_noise(data: &mut [f32], info: &cpal::OutputCallbackInfo) {
-    println!("write_noise for {} samples with info:{:?}", data.len(), info);
+    println!(
+        "write_noise for {} samples with info:{:?}",
+        data.len(),
+        info
+    );
     let mut rng = rand::thread_rng();
     let unif = rand_distr::Uniform::from(0.0..1.0);
     let mut s = 0.0;
@@ -119,7 +128,11 @@ fn write_noise(data: &mut [f32], info: &cpal::OutputCallbackInfo) {
 }
 
 fn write_silence<T: Sample>(data: &mut [T], info: &cpal::OutputCallbackInfo) {
-    println!("write_silence for {} samples with info:{:?}", data.len(), info);
+    println!(
+        "write_silence for {} samples with info:{:?}",
+        data.len(),
+        info
+    );
     for sample in data.iter_mut() {
         *sample = Sample::from(&0.0);
     }

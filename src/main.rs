@@ -75,10 +75,11 @@ fn use_wavs(use_jack: bool, n_producers: u32, wdescs_rx: Receiver<Option<WavDesc
     let (samples_tx, samples_rx) = bounded(2);
     let (playdone_tx, playdone_rx) = bounded(0);
     if use_jack {
-        let (client, status) = jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
+        let (client, status) =
+            jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
         println!("new client:{:?} status:{:?}", client, status);
         generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
-        play_to_jack(client, playdone_tx, samples_rx);    
+        play_to_jack(client, playdone_tx, samples_rx);
     } else {
         generate_samples(samples_tx, cpalplay::SAMPLE_RATE, wavpick_rx);
         cpalplay::play_to_cpal(playdone_tx, samples_rx);
@@ -151,7 +152,7 @@ fn main() {
     match cfg {
         Config::Buf(cfg) => {
             ringbuf::start(cfg.trigfile, cfg.n_entries);
-        },
+        }
         Config::Cpal => cpalplay::cpal_demo(),
         Config::Play(cfg) => {
             acoustic_walk(cfg);
