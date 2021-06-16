@@ -9,6 +9,7 @@ pub struct PlayConfig {
     pub excluded_wavs: HashSet<std::path::PathBuf>,
     pub dirs: Vec<String>,
     pub cap_ms: Option<u32>,
+    pub use_jack: bool,
 }
 
 #[derive(Clone)]
@@ -32,11 +33,16 @@ pub fn make_config() -> Config {
         .subcommand(
             SubCommand::with_name("play")
                 .arg(Arg::from_usage(
-                    "-e --exclude=[FILE] 'Read excluded WAVs from file'",
-                ))
-                .arg(Arg::from_usage(
                     "-c --len-cap=[INT] 'Cap on WAV length in ms as used for selection'",
                 ))
+                .arg(Arg::from_usage(
+                    "-e --exclude=[FILE] 'Read excluded WAVs from file'",
+                ))
+                .arg(Arg::with_name("jack")
+                    .long("--use-jack")
+                    .short("-j")
+                    .takes_value(false)
+                )
                 .arg(
                     Arg::with_name("dirs")
                         .required(true)
@@ -98,10 +104,16 @@ pub fn make_config() -> Config {
             } else {
                 None
             };
+            let use_jack = if let Some(_) = matches.value_of("jack") {
+                true
+            } else {
+                false
+            };
             Config::Play(PlayConfig {
                 excluded_wavs,
                 dirs,
                 cap_ms,
+                use_jack,
             })
         },
         _ => panic!("unrecognized subcommand"),

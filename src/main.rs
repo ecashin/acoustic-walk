@@ -69,17 +69,20 @@ fn play_to_jack(client: jack::Client, done_tx: Sender<()>, samples_rx: Receiver<
     done_tx.send(()).unwrap();
 }
 
-fn use_wavs(n_producers: u32, wdescs_rx: Receiver<Option<WavDesc>>) {
+fn use_wavs(use_jack: bool, n_producers: u32, wdescs_rx: Receiver<Option<WavDesc>>) {
     let wavpick_rx = wav::start_wav_picker(n_producers, wdescs_rx);
-
-    let (client, status) =
-        jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
-    println!("new client:{:?} status:{:?}", client, status);
 
     let (samples_tx, samples_rx) = bounded(2);
     let (playdone_tx, playdone_rx) = bounded(0);
-    generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
-    play_to_jack(client, playdone_tx, samples_rx);
+    if use_jack {
+        let (client, status) = jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
+        println!("new client:{:?} status:{:?}", client, status);
+        generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
+        play_to_jack(client, playdone_tx, samples_rx);    
+    } else {
+        generate_samples(samples_tx, cpal::SAMPLE_RATE, wavpick_rx);
+        play_to_cpal(playdone_tx, samples_rx);
+    }
     playdone_rx.recv().unwrap();
     println!("use_wavs received playdone message");
 }
@@ -151,13 +154,12 @@ fn main() {
         },
         Config::Cpal => cpal::cpal_demo(),
         Config::Play(cfg) => {
-            play(cfg);
+            acoustic_walk(cfg);
         }
     }
 }
 
-// fn play(excluded_wavs: HashSet<path::PathBuf>, dirs: Vec<String>, cap_ms: Option<u32>) {
-fn play(cfg: config::PlayConfig) {
+fn acoustic_walk(cfg: config::PlayConfig) {
     let (done_tx, done_rx) = bounded(0); // worker completion channel
     let (wdescs_tx, wdescs_rx) = bounded(0); // wav description channel
     {
@@ -165,7 +167,7 @@ fn play(cfg: config::PlayConfig) {
         let wdescs_rx = wdescs_rx;
         let done_tx = done_tx.clone();
         thread::spawn(move || {
-            use_wavs(N_PRODUCERS, wdescs_rx);
+            use_wavs(cfg.use_jack, N_PRODUCERS, wdescs_rx);
             done_tx.send(N_PRODUCERS).unwrap(); // consumer ID is one greater than max producer ID
         });
     }
