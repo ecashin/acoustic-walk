@@ -14,7 +14,7 @@ pub fn play_to_cpal(done_tx: Sender<()>, samples_rx: Receiver<Vec<f32>>) {
     let mut samples: Vec<f32> = Vec::new();
     let (cb_done_tx, cb_done_rx) = bounded(0);
     let mut consumed = 0;
-    let callback = move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
+    let callback = move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
         let n = data.len();
         if consumed > SAMPLE_RATE {
             samples = samples.split_off(consumed);
@@ -51,21 +51,10 @@ pub fn play_to_cpal(done_tx: Sender<()>, samples_rx: Receiver<Vec<f32>>) {
     .unwrap();
     stream.play().unwrap();
 
-    cb_done_rx.recv();
-    /*
-    (callback, cb_done_rx)
-    */
-    /*
     let _ = cb_done_rx.recv();
     println!("play received playdone message from cpal callback");
     println!("play_to_cpal is done");
     done_tx.send(()).unwrap();
-    */
-}
-
-enum Callback {
-    Noise,
-    Stream,
 }
 
 fn prep_for_stream() -> (Device, StreamConfig, SampleFormat) {
