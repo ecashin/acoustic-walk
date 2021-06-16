@@ -7,7 +7,7 @@ use grain::N_GRAINS;
 use wav::WavDesc;
 
 mod config;
-mod cpal;
+mod cpalplay;
 mod grain;
 mod ringbuf;
 mod wav;
@@ -80,8 +80,8 @@ fn use_wavs(use_jack: bool, n_producers: u32, wdescs_rx: Receiver<Option<WavDesc
         generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
         play_to_jack(client, playdone_tx, samples_rx);    
     } else {
-        generate_samples(samples_tx, cpal::SAMPLE_RATE, wavpick_rx);
-        play_to_cpal(playdone_tx, samples_rx);
+        generate_samples(samples_tx, cpalplay::SAMPLE_RATE, wavpick_rx);
+        cpalplay::play_to_cpal(playdone_tx, samples_rx);
     }
     playdone_rx.recv().unwrap();
     println!("use_wavs received playdone message");
@@ -152,7 +152,7 @@ fn main() {
         Config::Buf(cfg) => {
             ringbuf::start(cfg.trigfile, cfg.n_entries);
         },
-        Config::Cpal => cpal::cpal_demo(),
+        Config::Cpal => cpalplay::cpal_demo(),
         Config::Play(cfg) => {
             acoustic_walk(cfg);
         }
@@ -166,8 +166,9 @@ fn acoustic_walk(cfg: config::PlayConfig) {
         // Work consumer thread takes ownership of wdescs_rx.
         let wdescs_rx = wdescs_rx;
         let done_tx = done_tx.clone();
+        let use_jack = cfg.use_jack;
         thread::spawn(move || {
-            use_wavs(cfg.use_jack, N_PRODUCERS, wdescs_rx);
+            use_wavs(use_jack, N_PRODUCERS, wdescs_rx);
             done_tx.send(N_PRODUCERS).unwrap(); // consumer ID is one greater than max producer ID
         });
     }
