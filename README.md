@@ -12,7 +12,7 @@ To play shuffled audio, specify a directory
 where a recursive file-tree walk will find stereo 16-bit WAV files,
 as in the example below.
 
-    cargo run ~/samples-ecashin-orig/Zoom-H5
+    cargo run play ~/samples-ecashin-orig/Zoom-H5
 
 The application is designed to run until stopped
 with control-c.
@@ -27,9 +27,23 @@ in an exclude file specified via an option.
 Use `--` to separate acoustic-walk arguments
 from `cargo` arguments.
 
-    cargo run -- --exclude excluded.txt ~/samples-ecashin-orig/Zoom-H5
+    cargo run -- play --exclude excluded.txt \
+        ~/samples-ecashin-orig/Zoom-H5
 
-## JACK
+## Music Non-stop
+
+This application is designed to run indefinitely
+and lacks fully fledged shut-down mechanics by design.
+
+It can be manually stopped by control-c
+or by `kill`.
+
+## JACK Support
+
+The `play` subcommand offers a `--use-jack` option
+that causes acoustic-walk to use JACK for audio.
+
+By default it uses `cpal`, the cross-platform audio library.
 
 The applications sends stereo audio
 to the JACK audio system.
@@ -47,15 +61,7 @@ The opportunity was exposed by using `flamegraph`
 and opening the resulting SVG file in a web browser.
 
     cargo install flamegraph
-    flamegraph target/debug/acoustic-walk ~/samples-ecashin-orig/Zoom-H5
-
-## Music Non-stop
-
-This application is designed to run indefinitely
-and lacks fully fledged shut-down mechanics by design.
-
-It can be manually stopped by control-c
-or by `kill`.
+    flamegraph target/debug/acoustic-walk play ~/samples-ecashin-orig/Zoom-H5
 
 ## Example Scripts
 
@@ -64,13 +70,12 @@ for you to build upon.
 
     sh all-start.sh
 
-On my system, the above script (stops and) starts JACK
-(via `jack-start.sh`),
-settings it to use the same sample rate as my field recordings.
-Then it runs acoustic-walk in both "play" and "ring buffer" modes.
+The above command runs acoustic-walk in both "play" and "ring buffer" modes.
+It creates some files in the current working directory.
 To see output from the player, I trigger the ringbuf's output
 by creating a file named `acourun.show`.
 
-I can kill the acoustic-walk processes as shown below.
+I can kill the acoustic-walk processes as shown below
+or via `sh acouwalk.sh stop`.
 
     for i in *.pid; do kill `cat "$i"`; done
