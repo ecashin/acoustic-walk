@@ -35,10 +35,7 @@ pub fn play_to_cpal(done_tx: Sender<()>, samples_rx: Receiver<Vec<f32>>) {
             }
         }
         let n = std::cmp::min(n, samples.len());
-
-        for i in 0..n {
-            data[i] = samples[consumed + i];
-        }
+        data[..n].clone_from_slice(&samples[consumed..(n + consumed)]);
         consumed += n;
     };
     let (device, config, sample_format) = prep_for_stream();
@@ -62,12 +59,11 @@ fn prep_for_stream() -> (Device, StreamConfig, SampleFormat) {
     let device = host
         .default_output_device()
         .expect("no output device available");
-    let supported_configs_range = device
+    let mut supported_configs_range = device
         .supported_output_configs()
         .expect("error while querying configs");
     let supported_config = supported_configs_range
-        .filter(|c| c.channels() == 2 && c.sample_format() == SampleFormat::F32)
-        .next()
+        .find(|c| c.channels() == 2 && c.sample_format() == SampleFormat::F32)
         .expect("no supported config?!")
         .with_sample_rate(SampleRate(SAMPLE_RATE as u32));
     println!("selected config: {:#?}", supported_config);

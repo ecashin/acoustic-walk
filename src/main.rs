@@ -130,7 +130,7 @@ fn generate_samples(
                     }
                 }
             }
-            if bufs.len() > 0 {
+            if !bufs.is_empty() {
                 let mixed = mix(bufs);
                 println!(
                     "generate_samples sending {} mixed stereo samples",

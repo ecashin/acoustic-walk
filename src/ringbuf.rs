@@ -64,7 +64,7 @@ fn start_line_getter(line_tx: Sender<Entry>) {
         line_tx
             .send(Entry {
                 buf: buf.clone(),
-                rel_time: rel_time,
+                rel_time,
             })
             .unwrap();
     });

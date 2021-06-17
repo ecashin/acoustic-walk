@@ -42,7 +42,7 @@ pub fn start_wav_picker(
             .unwrap()
             .iter()
             .take(1)
-            .map(|e| *e)
+            .copied()
             .last()
             .unwrap();
         let wav = &wavs[which];
@@ -92,8 +92,8 @@ fn capped_ms(
     }
 }
 
-pub fn select_wavs(wavs: &Vec<WavDesc>, n: usize) -> Option<Vec<usize>> {
-    if wavs.len() == 0 {
+pub fn select_wavs(wavs: &[WavDesc], n: usize) -> Option<Vec<usize>> {
+    if wavs.is_empty() {
         return None;
     }
     let lens: Vec<f64> = wavs.iter().map(|e| e.ms_for_choice as f64).collect();
