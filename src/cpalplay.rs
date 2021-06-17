@@ -74,13 +74,6 @@ fn prep_for_stream() -> (Device, StreamConfig, SampleFormat) {
     let sample_format = supported_config.sample_format();
     let config = supported_config.into();
     (device, config, sample_format)
-    /*
-    match sample_format {
-        SampleFormat::F32 => device.build_output_stream(&config, callback, err_fn),
-        SampleFormat::I16 => device.build_output_stream(&config, write_silence::<i16>, err_fn),
-        SampleFormat::U16 => device.build_output_stream(&config, write_silence::<u16>, err_fn),
-    }.unwrap()
-    */
 }
 
 pub fn cpal_demo() {
@@ -113,7 +106,6 @@ fn write_noise(data: &mut [f32], info: &cpal::OutputCallbackInfo) {
         }
         *sample = Sample::from(&s);
     }
-    // println!("write_noise done.");
 }
 
 fn write_silence<T: Sample>(data: &mut [T], info: &cpal::OutputCallbackInfo) {
