@@ -25,7 +25,7 @@ impl Grain {
         Grain {
             start: 0,
             max_len: len,
-            len: len,
+            len,
         }
     }
     // Toss this grain in the air and let it randomly land somewhere.
@@ -111,11 +111,8 @@ pub fn make_grains(
                     send_buf.append(&mut sink_samples);
                 }
                 if send_buf.len() >= GRAIN_BUF_N_SAMPLES {
-                    let send_part: Vec<f32> = send_buf
-                        .iter()
-                        .take(GRAIN_BUF_N_SAMPLES)
-                        .map(|e| *e)
-                        .collect();
+                    let send_part: Vec<f32> =
+                        send_buf.iter().take(GRAIN_BUF_N_SAMPLES).copied().collect();
                     let new_len = send_buf.len() - GRAIN_BUF_N_SAMPLES;
                     let src_start = GRAIN_BUF_N_SAMPLES;
                     let src_end = src_start + new_len;

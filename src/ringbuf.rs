@@ -1,4 +1,5 @@
 use crossbeam_channel::{bounded, select, Sender};
+use std::collections::VecDeque;
 use std::fmt::{self, Display};
 use std::time::{Duration, SystemTime};
 use std::{io, path, thread};
@@ -15,17 +16,6 @@ impl Display for Entry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:.2}s: {}", self.rel_time.as_secs_f32(), self.buf)
     }
-}
-
-fn empty_n(n: usize) -> Vec<Entry> {
-    let mut v: Vec<_> = Vec::new();
-    for _ in 0..n {
-        v.push(Entry {
-            buf: String::from(""),
-            rel_time: Duration::new(0, 0),
-        });
-    }
-    v
 }
 
 fn start_trig_watcher(trigfile: path::PathBuf, trig_tx: Sender<bool>) {
@@ -64,16 +54,14 @@ fn start_line_getter(line_tx: Sender<Entry>) {
         line_tx
             .send(Entry {
                 buf: buf.clone(),
-                rel_time: rel_time,
+                rel_time,
             })
             .unwrap();
     });
 }
 
 pub fn start(trigfile: path::PathBuf, n_entries: usize) {
-    let zero_duration = Duration::from_secs(0);
-    let mut ring: Vec<Entry> = empty_n(n_entries);
-    let mut pos = 0;
+    let mut ring: VecDeque<Entry> = VecDeque::with_capacity(n_entries);
     let mut quiet = true;
     let (trig_tx, trig_rx) = bounded(0);
     start_trig_watcher(trigfile, trig_tx);
@@ -84,10 +72,12 @@ pub fn start(trigfile: path::PathBuf, n_entries: usize) {
             recv(line_rx) -> entry_msg => {
                 match entry_msg {
                     Ok(entry) => {
-                        pos = (pos + 1) % n_entries;
-                        ring[pos] = entry;
                         if !quiet {
-                            print!("{}", &ring[pos]);
+                            print!("{}", entry);
+                        }
+                        ring.push_back(entry);
+                        if ring.len() > n_entries {
+                            ring.pop_front();
                         }
                     },
                     Err(e) => {
@@ -101,12 +91,8 @@ pub fn start(trigfile: path::PathBuf, n_entries: usize) {
                     Ok(trig) => {
                         quiet = !trig;
                         if !quiet {
-                            let oldest_pos = pos + 1;
-                            for i in oldest_pos..n_entries + oldest_pos {
-                                let i = i % n_entries;
-                                if ring[i].rel_time > zero_duration {
-                                    print!("{}", &ring[i]);
-                                }
+                            for entry in ring.iter() {
+                                print!("{}", entry);
                             }
                         }
                     },

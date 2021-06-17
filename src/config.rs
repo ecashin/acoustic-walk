@@ -68,7 +68,7 @@ pub fn make_config() -> Config {
             let trigfile = if let Some(trigfile) = matches.value_of("trigger-file") {
                 path::PathBuf::from_str(trigfile).expect("path for trigger file")
             } else {
-                path::PathBuf::from_str("trigfile").expect("path for default trigfile")
+                path::PathBuf::from_str("acouwalk.show").expect("path for default trigfile")
             };
             let n_entries = if let Some(n) = matches.value_of("n-entries") {
                 n.parse::<usize>().unwrap()
@@ -82,7 +82,7 @@ pub fn make_config() -> Config {
         }
         ("play", Some(matches)) => {
             let dirs = if let Some(dirs) = matches.values_of("dirs") {
-                dirs.map(|e| String::from(e)).collect()
+                dirs.map(String::from).collect()
             } else {
                 Vec::new()
             };
@@ -105,11 +105,7 @@ pub fn make_config() -> Config {
             } else {
                 None
             };
-            let use_jack = if let Some(_) = matches.value_of("jack") {
-                true
-            } else {
-                false
-            };
+            let use_jack = matches.value_of("jack").is_some();
             Config::Play(PlayConfig {
                 excluded_wavs,
                 dirs,
