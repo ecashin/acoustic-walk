@@ -68,7 +68,7 @@ pub fn make_config() -> Config {
             let trigfile = if let Some(trigfile) = matches.value_of("trigger-file") {
                 path::PathBuf::from_str(trigfile).expect("path for trigger file")
             } else {
-                path::PathBuf::from_str("trigfile").expect("path for default trigfile")
+                path::PathBuf::from_str("acouwalk.show").expect("path for default trigfile")
             };
             let n_entries = if let Some(n) = matches.value_of("n-entries") {
                 n.parse::<usize>().unwrap()
