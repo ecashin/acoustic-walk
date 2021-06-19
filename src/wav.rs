@@ -37,18 +37,21 @@ pub fn start_wav_picker(
         wavs.len()
     );
     let (wavpick_tx, wavpick_rx) = bounded(0);
-    thread::spawn(move || loop {
-        let which = crate::wav::select_wavs(&wavs, 1)
-            .unwrap()
-            .iter()
-            .take(1)
-            .copied()
-            .last()
-            .unwrap();
-        let wav = &wavs[which];
-        println!("wav picker: {:?}", wav.path);
-        wavpick_tx.send(wav.clone()).unwrap();
-    });
+    thread::Builder::new()
+        .name("wav selector".to_string())
+        .spawn(move || loop {
+            let which = crate::wav::select_wavs(&wavs, 1)
+                .unwrap()
+                .iter()
+                .take(1)
+                .copied()
+                .last()
+                .unwrap();
+            let wav = &wavs[which];
+            println!("wav picker: {:?}", wav.path);
+            wavpick_tx.send(wav.clone()).unwrap();
+        })
+        .expect("spawning wav selector");
     wavpick_rx
 }
 
