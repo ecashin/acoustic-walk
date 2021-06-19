@@ -74,7 +74,13 @@ pub fn make_grains(
             let mut rng = rand::thread_rng();
             let mut send_buf: Vec<f32> = Vec::new();
             loop {
-                let wav = wavpick_rx.recv().unwrap();
+                let wav = match wavpick_rx.recv() {
+                    Err(e) => {
+                        eprintln!("receiving picked wav: {}", e);
+                        break;
+                    }
+                    Ok(w) => w,
+                };
                 let mut r = hound::WavReader::open(wav.path.clone()).ok().unwrap();
                 let src_sr = r.spec().sample_rate;
                 let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);
