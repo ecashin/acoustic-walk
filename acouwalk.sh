@@ -4,11 +4,20 @@ d=`dirname "$0"`
 set -xe
 cd "$d"
 
-if test "$1" = "stop"; then
-    test -r acouplay.pid && kill `cat acouplay.pid`
-    test -r acoubuf.pid && kill `cat acoubuf.pid`
-    exit
-fi
+case "$1" in
+    "stop")
+        test -r acouplay.pid && kill `cat acouplay.pid`
+        test -r acoubuf.pid && kill `cat acoubuf.pid`
+        exit
+    ;;
+    "")
+    ;;
+    *)
+        exec 1>&2
+        echo Usage: `basename "$0"` "[stop]"
+        exit 1
+    ;;
+esac
 
 cargo build
 rm -f acourun.pipe

@@ -115,33 +115,36 @@ fn generate_samples(
     let mut n_grain_makers = N_GRAINS;
     // now each grain maker will send JACK-ready samples in chunks mixed below
 
-    thread::spawn(move || {
-        while n_grain_makers > 0 {
-            let mut bufs: Vec<Vec<f32>> = Vec::new();
-            for i in 0..N_GRAINS {
-                match grains_rxs[i as usize].recv() {
-                    Ok(buf) => bufs.push(buf),
-                    Err(RecvError) => {
-                        n_grain_makers -= 1;
-                        println!(
-                            "Grain buffer receiver got RecvError -> {} grain makers remaining",
-                            n_grain_makers
-                        );
+    thread::Builder::new()
+        .name("mix sender".to_string())
+        .spawn(move || {
+            while n_grain_makers > 0 {
+                let mut bufs: Vec<Vec<f32>> = Vec::new();
+                for i in 0..N_GRAINS {
+                    match grains_rxs[i as usize].recv() {
+                        Ok(buf) => bufs.push(buf),
+                        Err(RecvError) => {
+                            n_grain_makers -= 1;
+                            println!(
+                                "Grain buffer receiver got RecvError -> {} grain makers remaining",
+                                n_grain_makers
+                            );
+                        }
                     }
                 }
+                if !bufs.is_empty() {
+                    let mixed = mix(bufs);
+                    println!(
+                        "generate_samples sending {} mixed stereo samples",
+                        mixed.len() / 2
+                    );
+                    samples_tx.send(mixed).unwrap();
+                } else {
+                    println!("generate_samples without anything to send");
+                }
             }
-            if !bufs.is_empty() {
-                let mixed = mix(bufs);
-                println!(
-                    "generate_samples sending {} mixed stereo samples",
-                    mixed.len() / 2
-                );
-                samples_tx.send(mixed).unwrap();
-            } else {
-                println!("generate_samples without anything to send");
-            }
-        }
-    });
+        })
+        .expect("spawning mix sender");
 
     N_GRAINS
 }
@@ -168,10 +171,13 @@ fn acoustic_walk(cfg: config::PlayConfig) {
         let wdescs_rx = wdescs_rx;
         let done_tx = done_tx.clone();
         let use_jack = cfg.use_jack;
-        thread::spawn(move || {
-            use_wavs(use_jack, N_PRODUCERS, wdescs_rx);
-            done_tx.send(N_PRODUCERS).unwrap(); // consumer ID is one greater than max producer ID
-        });
+        thread::Builder::new()
+            .name("wav user".to_string())
+            .spawn(move || {
+                use_wavs(use_jack, N_PRODUCERS, wdescs_rx);
+                done_tx.send(N_PRODUCERS).unwrap(); // consumer ID is one greater than max producer ID
+            })
+            .expect("wav user");
     }
 
     {
@@ -182,9 +188,12 @@ fn acoustic_walk(cfg: config::PlayConfig) {
             let done_tx = done_tx.clone();
             let wdescs_tx = wdescs_tx.clone();
             let cfg = cfg.clone();
-            thread::spawn(move || {
-                wav::survey_wavs(w, cfg, dirs_rx, wdescs_tx, done_tx);
-            });
+            thread::Builder::new()
+                .name("wav surveyor".to_string())
+                .spawn(move || {
+                    wav::survey_wavs(w, cfg, dirs_rx, wdescs_tx, done_tx);
+                })
+                .expect("spawning wav surveyor");
         }
         for d in cfg.dirs {
             for entry in WalkDir::new(d).into_iter().filter_map(|e| e.ok()) {

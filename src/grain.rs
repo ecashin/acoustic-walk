@@ -67,62 +67,71 @@ pub fn make_grains(
     sink_sr: usize,
 ) {
     let mut g = Grain::new(sink_sr as u32);
-    thread::spawn(move || {
-        println!("grain maker {} starting", grain_maker_id);
-        let mut rng = rand::thread_rng();
-        let mut send_buf: Vec<f32> = Vec::new();
-        loop {
-            let wav = wavpick_rx.recv().unwrap();
-            let mut r = hound::WavReader::open(wav.path.clone()).ok().unwrap();
-            let src_sr = r.spec().sample_rate;
-            let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);
-            for _ in 0..ttl {
-                let mut too_loud = false;
-                g.toss(wav.n_samples);
-                r.seek(g.start).ok();
-                let mut src_samples: Vec<f32> = r
-                    .samples()
-                    .take((g.len * 2) as usize)
-                    .map(|e: Result<i16, hound::Error>| {
-                        let s = e.ok().unwrap();
-                        if s == i16::MAX || s == i16::MIN {
-                            too_loud = true;
-                        }
-                        s as f32 / i16::MAX as f32
-                    })
-                    .enumerate()
-                    .map(|(i, s)| s * g.amplitude(i / 2, None))
-                    .collect();
-                if too_loud {
-                    println!("muting {:?} at too-loud sample index {}", wav.path, g.start);
-                    src_samples = src_samples.iter().map(|_| 0.0).collect();
-                }
-                if src_sr == sink_sr as u32 {
-                    send_buf.append(&mut src_samples);
-                } else {
-                    let mut sink_samples = convert(
-                        src_sr,
-                        sink_sr as u32,
-                        2,
-                        ConverterType::SincBestQuality,
-                        &src_samples[..],
-                    )
-                    .expect("converting sample rate");
-                    send_buf.append(&mut sink_samples);
-                }
-                if send_buf.len() >= GRAIN_BUF_N_SAMPLES {
-                    let send_part: Vec<f32> =
-                        send_buf.iter().take(GRAIN_BUF_N_SAMPLES).copied().collect();
-                    let new_len = send_buf.len() - GRAIN_BUF_N_SAMPLES;
-                    let src_start = GRAIN_BUF_N_SAMPLES;
-                    let src_end = src_start + new_len;
-                    for (i, j) in (src_start..src_end).enumerate() {
-                        send_buf[i] = send_buf[j];
+    thread::Builder::new()
+        .name("grain maker".to_string())
+        .spawn(move || {
+            println!("grain maker {} starting", grain_maker_id);
+            let mut rng = rand::thread_rng();
+            let mut send_buf: Vec<f32> = Vec::new();
+            loop {
+                let wav = match wavpick_rx.recv() {
+                    Err(e) => {
+                        eprintln!("receiving picked wav: {}", e);
+                        break;
                     }
-                    send_buf.truncate(new_len);
-                    grains_tx.send(send_part).unwrap();
+                    Ok(w) => w,
+                };
+                let mut r = hound::WavReader::open(wav.path.clone()).ok().unwrap();
+                let src_sr = r.spec().sample_rate;
+                let ttl = rand_distr::Uniform::from(1..WAV_MAX_TTL).sample(&mut rng);
+                for _ in 0..ttl {
+                    let mut too_loud = false;
+                    g.toss(wav.n_samples);
+                    r.seek(g.start).ok();
+                    let mut src_samples: Vec<f32> = r
+                        .samples()
+                        .take((g.len * 2) as usize)
+                        .map(|e: Result<i16, hound::Error>| {
+                            let s = e.ok().unwrap();
+                            if s == i16::MAX || s == i16::MIN {
+                                too_loud = true;
+                            }
+                            s as f32 / i16::MAX as f32
+                        })
+                        .enumerate()
+                        .map(|(i, s)| s * g.amplitude(i / 2, None))
+                        .collect();
+                    if too_loud {
+                        println!("muting {:?} at too-loud sample index {}", wav.path, g.start);
+                        src_samples = src_samples.iter().map(|_| 0.0).collect();
+                    }
+                    if src_sr == sink_sr as u32 {
+                        send_buf.append(&mut src_samples);
+                    } else {
+                        let mut sink_samples = convert(
+                            src_sr,
+                            sink_sr as u32,
+                            2,
+                            ConverterType::SincBestQuality,
+                            &src_samples[..],
+                        )
+                        .expect("converting sample rate");
+                        send_buf.append(&mut sink_samples);
+                    }
+                    if send_buf.len() >= GRAIN_BUF_N_SAMPLES {
+                        let send_part: Vec<f32> =
+                            send_buf.iter().take(GRAIN_BUF_N_SAMPLES).copied().collect();
+                        let new_len = send_buf.len() - GRAIN_BUF_N_SAMPLES;
+                        let src_start = GRAIN_BUF_N_SAMPLES;
+                        let src_end = src_start + new_len;
+                        for (i, j) in (src_start..src_end).enumerate() {
+                            send_buf[i] = send_buf[j];
+                        }
+                        send_buf.truncate(new_len);
+                        grains_tx.send(send_part).unwrap();
+                    }
                 }
             }
-        }
-    });
+        })
+        .expect("spawning grain maker");
 }

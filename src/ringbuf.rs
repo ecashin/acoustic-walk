@@ -19,45 +19,51 @@ impl Display for Entry {
 }
 
 fn start_trig_watcher(trigfile: path::PathBuf, trig_tx: Sender<bool>) {
-    thread::spawn(move || {
-        let mut last_state = trigfile.exists();
-        trig_tx.send(last_state).unwrap();
-        loop {
-            thread::sleep(Duration::from_secs(1));
-            let state = trigfile.exists();
-            if state != last_state {
-                trig_tx.send(state).unwrap();
-                last_state = state;
+    thread::Builder::new()
+        .name("trig watcher".to_string())
+        .spawn(move || {
+            let mut last_state = trigfile.exists();
+            trig_tx.send(last_state).unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(1));
+                let state = trigfile.exists();
+                if state != last_state {
+                    trig_tx.send(state).unwrap();
+                    last_state = state;
+                }
             }
-        }
-    });
+        })
+        .expect("spawning trig watcher");
 }
 
 fn start_line_getter(line_tx: Sender<Entry>) {
     let start = SystemTime::now();
     let stdin = io::stdin();
     let mut buf = String::new();
-    thread::spawn(move || loop {
-        buf.truncate(0);
-        match stdin.read_line(&mut buf).ok() {
-            Some(n) => {
-                if n == 0 {
-                    eprintln!("line getter got zero read from stdin and exits now");
-                    return;
+    thread::Builder::new()
+        .name("line getter".to_string())
+        .spawn(move || loop {
+            buf.truncate(0);
+            match stdin.read_line(&mut buf).ok() {
+                Some(n) => {
+                    if n == 0 {
+                        eprintln!("line getter got zero read from stdin and exits now");
+                        return;
+                    }
                 }
+                None => println!("line getter got None from stdin"),
             }
-            None => println!("line getter got None from stdin"),
-        }
-        let rel_time = SystemTime::now()
-            .duration_since(start)
-            .expect("getting time in line getter");
-        line_tx
-            .send(Entry {
-                buf: buf.clone(),
-                rel_time,
-            })
-            .unwrap();
-    });
+            let rel_time = SystemTime::now()
+                .duration_since(start)
+                .expect("getting time in line getter");
+            line_tx
+                .send(Entry {
+                    buf: buf.clone(),
+                    rel_time,
+                })
+                .unwrap();
+        })
+        .expect("spawning line getter");
 }
 
 pub fn start(trigfile: path::PathBuf, n_entries: usize) {
