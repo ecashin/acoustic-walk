@@ -19,9 +19,12 @@ pub struct Grain {
 }
 
 impl Grain {
-    pub fn new(sr: u32) -> Self {
+    pub fn new(grain_ms: Option<u32>, sr: u32) -> Self {
         let sr_ms = sr / 1000;
-        let len = GRAIN_MS * sr_ms;
+        let len = match grain_ms {
+            Some(g) => g,
+            None => GRAIN_MS,
+        } * sr_ms;
         Grain {
             start: 0,
             max_len: len,
@@ -62,11 +65,12 @@ impl Grain {
 
 pub fn make_grains(
     grain_maker_id: u32,
+    grain_ms: Option<u32>,
     wavpick_rx: Receiver<WavDesc>,
     grains_tx: Sender<Vec<f32>>,
     sink_sr: usize,
 ) {
-    let mut g = Grain::new(sink_sr as u32);
+    let mut g = Grain::new(grain_ms, sink_sr as u32);
     thread::Builder::new()
         .name("grain maker".to_string())
         .spawn(move || {

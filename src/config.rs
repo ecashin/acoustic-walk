@@ -9,6 +9,7 @@ pub struct PlayConfig {
     pub excluded_wavs: HashSet<std::path::PathBuf>,
     pub dirs: Vec<String>,
     pub cap_ms: Option<u32>,
+    pub grain_ms: Option<u32>,
     pub use_jack: bool,
 }
 
@@ -44,6 +45,9 @@ pub fn make_config() -> Config {
                         .short("-j")
                         .takes_value(false),
                 )
+                .arg(Arg::from_usage(
+                    "-g --grain-ms=[INT] 'Milliseconds for minimum grain length'",
+                ))
                 .arg(
                     Arg::with_name("dirs")
                         .required(true)
@@ -105,11 +109,19 @@ pub fn make_config() -> Config {
             } else {
                 None
             };
+
+            let grain_ms = if let Some(ms) = matches.value_of("grain-ms") {
+                Some(ms.parse::<u32>().expect("ill formed grain milliseconds"))
+            } else {
+                None
+            };
+
             let use_jack = matches.value_of("jack").is_some();
             Config::Play(PlayConfig {
                 excluded_wavs,
                 dirs,
                 cap_ms,
+                grain_ms,
                 use_jack,
             })
         }

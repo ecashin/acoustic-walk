@@ -69,7 +69,12 @@ fn play_to_jack(client: jack::Client, done_tx: Sender<()>, samples_rx: Receiver<
     done_tx.send(()).unwrap();
 }
 
-fn use_wavs(use_jack: bool, n_producers: u32, wdescs_rx: Receiver<Option<WavDesc>>) {
+fn use_wavs(
+    grain_ms: Option<u32>,
+    use_jack: bool,
+    n_producers: u32,
+    wdescs_rx: Receiver<Option<WavDesc>>,
+) {
     let wavpick_rx = wav::start_wav_picker(n_producers, wdescs_rx);
 
     let (samples_tx, samples_rx) = bounded(2);
@@ -78,10 +83,10 @@ fn use_wavs(use_jack: bool, n_producers: u32, wdescs_rx: Receiver<Option<WavDesc
         let (client, status) =
             jack::Client::new("acouwalk", jack::ClientOptions::NO_START_SERVER).unwrap();
         println!("new client:{:?} status:{:?}", client, status);
-        generate_samples(samples_tx, client.sample_rate(), wavpick_rx);
+        generate_samples(grain_ms, samples_tx, client.sample_rate(), wavpick_rx);
         play_to_jack(client, playdone_tx, samples_rx);
     } else {
-        generate_samples(samples_tx, cpalplay::SAMPLE_RATE, wavpick_rx);
+        generate_samples(grain_ms, samples_tx, cpalplay::SAMPLE_RATE, wavpick_rx);
         cpalplay::play_to_cpal(playdone_tx, samples_rx);
     }
     playdone_rx.recv().unwrap();
@@ -101,6 +106,7 @@ fn mix(bufs: Vec<Vec<f32>>) -> Vec<f32> {
 }
 
 fn generate_samples(
+    grain_ms: Option<u32>,
     samples_tx: Sender<Vec<f32>>,
     sink_sr: usize,
     wavpick_rx: Receiver<WavDesc>,
@@ -109,7 +115,7 @@ fn generate_samples(
     for i in 0..N_GRAINS {
         let (grains_tx, grains_rx) = bounded(0);
         let wavpick_rx = wavpick_rx.clone();
-        grain::make_grains(i, wavpick_rx, grains_tx, sink_sr);
+        grain::make_grains(i, grain_ms, wavpick_rx, grains_tx, sink_sr);
         grains_rxs.push(grains_rx);
     }
     let mut n_grain_makers = N_GRAINS;
@@ -171,10 +177,11 @@ fn acoustic_walk(cfg: config::PlayConfig) {
         let wdescs_rx = wdescs_rx;
         let done_tx = done_tx.clone();
         let use_jack = cfg.use_jack;
+        let grain_ms = cfg.grain_ms;
         thread::Builder::new()
             .name("wav user".to_string())
             .spawn(move || {
-                use_wavs(use_jack, N_PRODUCERS, wdescs_rx);
+                use_wavs(grain_ms, use_jack, N_PRODUCERS, wdescs_rx);
                 done_tx.send(N_PRODUCERS).unwrap(); // consumer ID is one greater than max producer ID
             })
             .expect("wav user");

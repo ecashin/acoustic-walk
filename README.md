@@ -30,6 +30,19 @@ from `cargo` arguments.
     cargo run -- play --exclude excluded.txt \
         ~/samples-ecashin-orig/Zoom-H5
 
+## Grain Length
+
+Short grains smear tiny sounds together
+for an acoustic blur,
+while long (e.g. 3000 ms) grains allow, e.g.,
+a whole bird call to appear in the stream.
+
+The default is one second, 1000 ms.
+
+    cargo run -- play --exclude excluded.txt \
+        --grain-ms 3000 \
+        ~/samples-ecashin-orig/Zoom-H5
+
 ## Music Non-stop
 
 This application is designed to run indefinitely
